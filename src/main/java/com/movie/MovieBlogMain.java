@@ -16,11 +16,12 @@ public class MovieBlogMain {
     private static final String GIST_ID = System.getenv("GIST_ID");
     private static final String FEISHU_WEBHOOK_MOVIE = System.getenv("FEISHU_WEBHOOK_MOVIE");
     private static final String DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
-    private static final int MAX_OUTPUT_TOKENS = 2200;
-    // 优化：调整为用户要求的1500‑1800字符
+    // 大幅上调最大输出token，彻底解决字数上限不足问题
+    private static final int MAX_OUTPUT_TOKENS = 3200;
+    // 用户指定最终字数区间：1500-1800字符
     private static final int ARTICLE_MIN_LEN = 1500;
     private static final int ARTICLE_MAX_LEN = 1800;
-    // 字数不达标，AI重写最大次数
+    // AI重写最大次数
     private static final int MAX_REWRITE_TIMES = 3;
     private static final int MAX_HISTORY_SIZE = 200;
     private static final String GIST_FILENAME = "movie_history.json";
@@ -83,7 +84,7 @@ public class MovieBlogMain {
             int year = selectMovie.getIntValue("year");
             String source = selectMovie.getString("source");
             System.out.printf("今日选中影片：%s (%d)｜选片来源：%s%n", title, year, source);
-            // AI生成影评，内置字数不达标自动重写
+            // AI生成影评，内置字数不合格自动重写
             String articleContent = generateReviewWithRewrite(title, year, source);
             System.out.printf("生成完成，文章字符长度：%d%n", articleContent.length());
             // 兜底字数校验
@@ -164,11 +165,12 @@ public class MovieBlogMain {
         pick.put("source", "经典高分品质影片");
         return pick;
     }
-    /** 带字数不合格自动多轮重写 */
+    /** 带字数不合格自动多轮重写，新增重写差异化提示，避免重复短文本 */
     private static String generateReviewWithRewrite(String title, int year, String source) throws IOException {
         for (int round = 1; round <= MAX_REWRITE_TIMES; round++) {
             System.out.printf("------ AI生成第 %d 轮 ------%n", round);
-            String content = generateReviewOnce(title, year, source);
+            // 每一轮重写传入不同指令，强制扩写内容，杜绝字数偏低
+            String content = generateReviewOnce(title, year, source, round);
             int len = content.length();
             System.out.printf("本轮生成字符数：%d%n", len);
             if (len >= ARTICLE_MIN_LEN && len <= ARTICLE_MAX_LEN) {
@@ -179,29 +181,42 @@ public class MovieBlogMain {
         }
         throw new IOException("经过" + MAX_REWRITE_TIMES + "轮重写，仍然无法生成符合字数要求的影评");
     }
-    /** 单次调用DeepSeek生成影评，优化分段、字数、文风规则 */
-    private static String generateReviewOnce(String title, int year, String source) throws IOException {
+    /**
+     * 修复版单次生成方法：新增轮次差异化扩写、强制字数兜底、细化扩写规则
+     * 彻底解决DeepSeek输出字数不足问题
+     */
+    private static String generateReviewOnce(String title, int year, String source, int rewriteRound) throws IOException {
+        // 差异化Prompt：首轮正常生成，后续轮次强制细节扩写、深化感受
+        String extraRule = "";
+        if (rewriteRound == 2) {
+            extraRule = "当前为第二轮重写，必须大幅扩写内容：细化观影情绪、补充生活共鸣细节、深化镜头氛围解读，严禁精简内容，务必填满1500字以上，杜绝短篇输出。";
+        } else if (rewriteRound == 3) {
+            extraRule = "当前为第三轮强制扩写，必须极致填充细节：增加个人生活化感悟、细化人物心理刻画、拓展时代情绪共鸣，拉长段落表述，严格保证总字数不低于1500字，不超1800字。";
+        }
         String sysPrompt = String.format("""
 你是一位审美敏锐、风格私人化的独立电影博主，拒绝流水线模板影评，拒绝大段复述剧情，行文有个人温度与锋利的个体感受，不要写教科书式分析文。
 今日影片：%s（%d）；选片来源：%s。
-硬性写作规则：
-1、全文严格控制在【1500‑1800个中文字符】，纯普通段落排版，不要标题、不要摘要、不要打分，禁止神作、封神、yyds这类网络烂词；
-2、强制多分段写作，全文至少分为6-8个自然段落，段落长短错落，避免整文一大段，保证阅读层次感；
+硬性写作规则（必须100%遵守）：
+1、全文严格控制在【1500‑1800个中文字符】，必须达标下限，严禁不足字数，纯普通段落排版，不要标题、不要摘要、不要打分，禁止神作、封神、yyds这类网络烂词；
+2、强制多分段写作，全文固定分为7-8个自然段落，段落长短错落，避免整文扎堆，保证阅读层次感；
 3、剧情介绍只允许1-2句话，绝不占用主要篇幅，禁止复述完整故事线；
-4、以私人观影体感切入，可以写被击中的瞬间、某个微小镜头、人物难言的处境，允许写出疑惑、惋惜、不完全认同的观点，不要通篇一味吹捧；
-5、重点挖掘人物内心褶皱、留白细节、镜头氛围、时代情绪，写出电影留给人的余味，避免生硬专业术语堆砌；
-6、若是近期院线新片，重点结合当下普通人的现实处境、生活共鸣、社会情绪展开创作；若是经典老片，侧重剖析人的生存状态、人性内核与时代烙印；
-7、行文松弛自然，有个人特色，杜绝模板句式：“这部电影讲述了、本片运用镜头、由此可以看出”这类书面套话；
-8、充分展开细节感受，保证内容饱满达标字数下限，严禁水字数、严禁抄袭网络现成影评，全部为原创私人观影感受，直接输出正文，无任何前置后缀说明。
-""", title, year, source);
+4、以私人观影体感切入，重点细化被击中的瞬间、微小镜头细节、人物难言的处境，可写出疑惑、惋惜、不完全认同的多元观点，拒绝单一吹捧；
+5、深度挖掘人物内心褶皱、画面留白细节、镜头氛围、当下时代情绪，充分展开每一段感悟，杜绝内容单薄、语句简短；
+6、若是近期院线新片，重点结合当下年轻人职场、生活、内耗、治愈等现实处境强化共鸣；若是经典老片，深度剖析人性内核与时代生存烙印；
+7、行文松弛自然，有专属个人文风，杜绝所有模板套话，所有内容为原创私人观影感受，严禁精简、敷衍、水字数；
+8、每一段内容必须充分展开，细化心理活动、场景感受、自我共情思考，保证内容饱满厚重，稳稳达到1500字以上标准。
+%s
+""", title, year, source, extraRule);
         JSONObject reqBody = new JSONObject();
         reqBody.put("model", "deepseek-v4-flash");
         reqBody.put("max_tokens", MAX_OUTPUT_TOKENS);
-        reqBody.put("temperature",0.78);
+        // 微调参数，提升内容丰富度，避免简短输出
+        reqBody.put("temperature", 0.82);
+        reqBody.put("top_p", 0.92);
         reqBody.put("extra_body", JSONObject.of("thinking", false));
         JSONArray msgs = new JSONArray();
         msgs.add(JSONObject.of("role", "system", "content", sysPrompt));
-        msgs.add(JSONObject.of("role","user","content","请直接输出分段完整影评正文"));
+        msgs.add(JSONObject.of("role","user","content","请严格遵守字数和分段规则，输出饱满、细节丰富、1500字以上的完整影评正文，禁止简短输出！"));
         reqBody.put("messages", msgs);
         int httpRetry = 2;
         Exception lastErr = null;
