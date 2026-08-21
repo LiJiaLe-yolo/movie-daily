@@ -1,10 +1,8 @@
 package com.movie;
-
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import okhttp3.*;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -13,17 +11,17 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 public class MovieBlogMain {
-
     // ============ 环境变量，从GitHub Action secrets注入 ============
     private static final String DEEPSEEK_API_KEY = System.getenv("DEEPSEEK_API_KEY");
     private static final String GH_PAT = System.getenv("GH_PAT");
     private static final String GIST_ID = System.getenv("GIST_ID");
     private static final String FEISHU_WEBHOOK_MOVIE = System.getenv("FEISHU_WEBHOOK_MOVIE");
-
     private static final String DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
-    private static final int MAX_OUTPUT_TOKENS = 2800;
-    private static final int ARTICLE_MIN_LEN = 1500;
-    private static final int ARTICLE_MAX_LEN = 2200;
+
+    private static final int MAX_OUTPUT_TOKENS = 2200;
+    // 严格字数：1560‑1800字符
+    private static final int ARTICLE_MIN_LEN = 1560;
+    private static final int ARTICLE_MAX_LEN = 1800;
     // 字数不达标，AI重写最大次数
     private static final int MAX_REWRITE_TIMES = 3;
     private static final int MAX_HISTORY_SIZE = 200;
@@ -82,7 +80,6 @@ public class MovieBlogMain {
             checkEnv();
             initDir();
             System.out.println("=====电影博主每日影评任务启动=====");
-
             JSONObject gistData = safeReadGist();
             JSONArray usedMovies = gistData.getJSONArray("used_movies");
             System.out.printf("读取历史已写影片，共%d条%n", usedMovies.size());
@@ -106,7 +103,6 @@ public class MovieBlogMain {
 
             // 本地落盘输出文件
             saveOutput(title, year, source, articleContent);
-
             // 写入Gist历史库，防止重复选题
             appendToGistHistory(gistData, title, year, source);
 
@@ -202,26 +198,30 @@ public class MovieBlogMain {
         throw new IOException("经过" + MAX_REWRITE_TIMES + "轮重写，仍然无法生成符合字数要求的影评");
     }
 
-    /** 单次调用DeepSeek‑V4‑Flash生成影评 */
+    /** 单次调用DeepSeek‑V4‑Flash生成影评，优化prompt，提升文风，temperature=0.78 */
     private static String generateReviewOnce(String title, int year, String source) throws IOException {
         String sysPrompt = String.format("""
-                你是一名审美有品位的深度电影博主，拒绝网络套话、拒绝流水线影评，拒绝大段复述剧情。
-                今日影片：%s（%d）；选片来源：%s。
-                硬性写作约束：
-                1.务必写足1500‑2200中文字符，markdown格式，充分展开论述，禁止简略仓促收尾；
-                2.第一人称真实观影感受切入；重点分析镜头语言、叙事手法、人物内核、社会隐喻、个人思考；
-                3.禁止“封神”“神作”“yyds”这类网络泛滥词汇，不要简单打分评判好坏；
-                4.固定行文结构：开篇观影感受引入 → 镜头与人物细读 → 现实延伸思考 → 结尾个人感悟；
-                5.输出视角要有品位，挖掘电影背后人文情绪，不要流于表层剧情介绍；严禁抄袭网上现成影评；
-                6.直接输出完整正文，不要摘要、不要说明性多余文字。
-                """, title, year, source);
+你是一位审美敏锐、风格私人化的独立电影博主，拒绝流水线模板影评，拒绝大段复述剧情，行文有个人温度与锋利的个体感受，不要写教科书式分析文。
+今日影片：%s（%d）；选片来源：%s。
+
+硬性写作规则：
+1、全文严格控制在【1560‑1800个中文字符】，markdown普通段落，不要标题、不要摘要、不要打分，禁止神作、封神、yyds这类网络烂词；
+2、剧情介绍只允许1‑2句话，绝不占用主要篇幅，禁止复述完整故事线；
+3、以私人观影体感切入，可以写被击中的瞬间、某个微小镜头、人物难言的处境，允许写出疑惑、惋惜、不完全认同的观点，不要通篇一味吹捧；
+4、重点挖掘人物内心褶皱、留白细节、镜头氛围、时代情绪，写出电影留给人的余味，避免生硬专业术语堆砌；
+5、行文松弛自然，有自己的表达特色，杜绝模板句式：“这部电影讲述了、本片运用镜头、由此可以看出”这类书面套话尽量删掉；
+6、若是近期院线新片，可以结合当下普通人的现实处境产生共鸣；若是经典老片，侧重剖析人的生存状态与时代烙印；
+7、尽量把感受铺展开写，把细节感受充分展开，务必达到字数下限；严禁抄袭网络现成影评，全部为自己的感受表达；直接输出正文，不要任何前置说明、结束语。
+""", title, year, source);
 
         JSONObject reqBody = new JSONObject();
         reqBody.put("model", "deepseek-v4-flash");
         reqBody.put("max_tokens", MAX_OUTPUT_TOKENS);
+        reqBody.put("temperature",0.78);
         reqBody.put("extra_body", JSONObject.of("thinking", false));
         JSONArray msgs = new JSONArray();
         msgs.add(JSONObject.of("role", "system", "content", sysPrompt));
+        msgs.add(JSONObject.of("role","user","content","请直接输出影评正文"));
         reqBody.put("messages", msgs);
 
         int httpRetry = 2;
@@ -309,7 +309,6 @@ public class MovieBlogMain {
         while (used.size() > MAX_HISTORY_SIZE) {
             used.remove(0);
         }
-
         JSONObject body = new JSONObject();
         JSONObject filesWrap = new JSONObject();
         JSONObject fileItem = new JSONObject();
@@ -344,7 +343,6 @@ public class MovieBlogMain {
         String preview = content.length() > previewMax
                 ? content.substring(0, previewMax) + "\n……\n> 📄完整稿件请查看Action产物 movie_article.md"
                 : content;
-
         JSONObject card = new JSONObject();
         card.put("msg_type", "interactive");
         JSONObject cardBody = new JSONObject();
