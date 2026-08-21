@@ -22,8 +22,9 @@ public class MovieBlogMain {
 
     private static final String DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
     private static final int MAX_OUTPUT_TOKENS = 2800;
+    // 放宽上限，v4‑flash中文输出字符膨胀
     private static final int ARTICLE_MIN_LEN = 1500;
-    private static final int ARTICLE_MAX_LEN = 1800;
+    private static final int ARTICLE_MAX_LEN = 2200;
     private static final int MAX_HISTORY_SIZE = 200;
     private static final String GIST_FILENAME = "movie_history.json";
     private static final String OUTPUT_DIR = "output";
@@ -171,7 +172,7 @@ public class MovieBlogMain {
                 你是一名独立深度电影博主，有稳定个人表达，拒绝网络影评套话，拒绝大段复述剧情。
                 今日影片：%s（%d）；选片来源：%s。
                 硬性写作约束：
-                1.全文严格1500‑1800字，输出markdown格式；
+                1.全文字符严格控制在1500‑1800字符，输出markdown格式；禁止过度延展、不要写多余段落；
                 2.以第一人称观影感受切入，少剧透；重点写镜头语言、人物内核、社会隐喻、个人思考；
                 3.禁止“封神”“神作”“yyds”这类网络泛滥词汇；不要简单打分评价好坏；
                 4.文章结构：开篇观影感受引入 → 镜头/人物细读 → 现实延伸思考 → 结尾个人感悟；
@@ -314,13 +315,14 @@ public class MovieBlogMain {
         JSONObject cardBody = new JSONObject();
         cardBody.put("wide_screen_mode", true);
         JSONArray elements = new JSONArray();
-        elements.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md", "content", String.format("**🎬今日影评：%s（%d）**\n选片来源：%s", title, year, source))));
+        elements.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md",
+                "content", String.format("**🎬今日影评：%s（%d）**\n选片来源：%s", title, year, source))));
         elements.add(JSONObject.of("tag", "hr"));
         elements.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md", "content", preview)));
         cardBody.put("elements", elements);
         card.put("card", cardBody);
 
-        RequestBody rb = RequestBody.create(card.toString(), MediaType.parse("application/json;charset=utf‑8"));
+        RequestBody rb = RequestBody.create(card.toString(), MediaType.parse("application/json;charset=utf-8"));
         Request req = new Request.Builder()
                 .url(FEISHU_WEBHOOK_MOVIE)
                 .post(rb)
