@@ -12,14 +12,13 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GH_PAT }}
+          # 关键：使用 github‑app token 模式，不要填 GH_PAT
+          fetch-depth: 0
       - name: 执行空提交保活
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           git config --global user.name "KeepAlive‑Bot"
           git config --global user.email "bot@no‑mail.example"
-          # 重写remote origin，把PAT嵌入url，push使用该token鉴权
-          git remote set-url origin https://${GH_PAT}@github.com/LiJiaLe-yolo/movie-daily.git
+          # 强制替换origin为内置GITHUB_TOKEN的url，这一步是根治403的核心
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
           git commit --allow-empty -m "chore: repo keep‑alive"
           git push
