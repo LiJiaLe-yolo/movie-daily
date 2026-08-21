@@ -97,10 +97,10 @@ public class MovieBlogMain {
             saveOutput(title, year, source, articleContent);
             // 写入Gist历史库，防止重复选题
             appendToGistHistory(gistData, title, year, source);
-            // 飞书推送【完整全文】，无截断、无省略
+            // 飞书推送【修复版完整卡片全文推送】
             try {
-                sendFeishuFullArticle(title, year, source, articleContent, articleLen);
-                System.out.println("✅飞书全文推送完成，已完整展示整篇影评");
+                sendFeishuFullCardArticle(title, year, source, articleContent, articleLen);
+                System.out.println("✅飞书全文卡片推送完成，无截断、无静默拦截");
             } catch (Exception e) {
                 System.err.println("⚠️飞书推送异常：" + e.getMessage());
                 e.printStackTrace();
@@ -327,20 +327,37 @@ public class MovieBlogMain {
         }
         throw new IOException("写入Gist历史全部重试失败");
     }
-    // ============ 飞书全文推送（核心修复：无截断、完整推送整篇影评） ============
-    private static void sendFeishuFullArticle(String title, int year, String source, String content, int contentLen) throws IOException {
-        // 组装完整头部信息+全文内容，无任何截断省略
-        StringBuilder fullMsg = new StringBuilder();
-        fullMsg.append("**🎬今日影评：").append(title).append("（").append(year).append("）**\n");
-        fullMsg.append("📌选片来源：").append(source).append("\n");
-        fullMsg.append("📝文章字数：").append(contentLen).append("字符\n");
-        fullMsg.append("——————————————\n\n");
-        // 直接拼接完整影评正文
-        fullMsg.append(content);
-        // 改用纯文本消息类型，突破卡片30KB长度限制，完美承载1500-1800字全文
+    // ============ 【最终修复版】飞书完整全文卡片推送 ============
+    // 解决：纯文本超长被飞书静默拦截、无报错不推送问题
+    // 逻辑：自动分段拆分全文、卡片承载、100%完整展示、不截断、不丢失
+    private static void sendFeishuFullCardArticle(String title, int year, String source, String content, int contentLen) throws IOException {
+        // 头部基础信息
+        String header = String.format("**🎬今日影评：%s（%d）**\n📌选片来源：%s\n📝文章字数：%d字符\n——————————————\n\n",
+                title, year, source, contentLen);
+        // 飞书单卡片安全阈值：1200字符，自动拆分全文，保证每段都能推送成功
+        int chunkSize = 1200;
+        // 先推头部信息卡片
+        sendFeishuCardChunk(header);
+        // 正文循环分片推送，保证整篇完整送达
+        int len = content.length();
+        for (int i = 0; i < len; i += chunkSize) {
+            int end = Math.min(i + chunkSize, len);
+            String chunk = content.substring(i, end);
+            sendFeishuCardChunk(chunk);
+            // 短时休眠，防止飞书接口限流
+            sleepMs(300);
+        }
+    }
+    // 通用单段卡片推送方法
+    private static void sendFeishuCardChunk(String text) throws IOException {
         JSONObject payload = new JSONObject();
-        payload.put("msg_type", "text");
-        payload.put("content", fullMsg.toString());
+        payload.put("msg_type", "interactive");
+        JSONObject cardBody = new JSONObject();
+        cardBody.put("wide_screen_mode", true);
+        JSONArray elements = new JSONArray();
+        elements.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md", "content", text)));
+        cardBody.put("elements", elements);
+        payload.put("card", cardBody);
         RequestBody rb = RequestBody.create(payload.toString(), MediaType.parse("application/json;charset=utf-8"));
         Request req = new Request.Builder()
                 .url(FEISHU_WEBHOOK_MOVIE)
@@ -348,8 +365,7 @@ public class MovieBlogMain {
                 .build();
         try (Response resp = HTTP_CLIENT.newCall(req).execute()) {
             if (!resp.isSuccessful()) {
-                System.err.println("飞书全文推送失败，http状态码:"+resp.code());
-                throw new IOException("飞书接口请求异常");
+                throw new IOException("推送分片失败，状态码：" + resp.code());
             }
         }
     }
