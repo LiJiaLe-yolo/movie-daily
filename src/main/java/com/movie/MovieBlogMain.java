@@ -86,20 +86,21 @@ public class MovieBlogMain {
             System.out.printf("今日选中影片：%s (%d)｜选片来源：%s%n", title, year, source);
             // AI生成影评，内置字数不合格自动重写
             String articleContent = generateReviewWithRewrite(title, year, source);
-            System.out.printf("生成完成，文章字符长度：%d%n", articleContent.length());
+            int articleLen = articleContent.length();
+            System.out.printf("生成完成，文章字符长度：%d%n", articleLen);
             // 兜底字数校验
-            if (articleContent.length() < ARTICLE_MIN_LEN || articleContent.length() > ARTICLE_MAX_LEN) {
-                throw new RuntimeException("影评字数校验不通过！实际=" + articleContent.length()
+            if (articleLen < ARTICLE_MIN_LEN || articleLen > ARTICLE_MAX_LEN) {
+                throw new RuntimeException("影评字数校验不通过！实际=" + articleLen
                         + "，要求：" + ARTICLE_MIN_LEN + "-" + ARTICLE_MAX_LEN);
             }
             // 本地落盘输出文件
             saveOutput(title, year, source, articleContent);
             // 写入Gist历史库，防止重复选题
             appendToGistHistory(gistData, title, year, source);
-            // 推飞书（失败仅告警，不阻断主流程）
+            // 飞书推送（新增实时字数展示）
             try {
-                sendFeishuCard(title, year, source, articleContent);
-                System.out.println("✅飞书卡片推送完成");
+                sendFeishuCard(title, year, source, articleContent, articleLen);
+                System.out.println("✅飞书卡片推送完成，已展示当前影评字数");
             } catch (Exception e) {
                 System.err.println("⚠️飞书推送异常：" + e.getMessage());
                 e.printStackTrace();
@@ -182,40 +183,40 @@ public class MovieBlogMain {
         throw new IOException("经过" + MAX_REWRITE_TIMES + "轮重写，仍然无法生成符合字数要求的影评");
     }
     /**
-     * 修复版单次生成方法：彻底解决String.format中文格式异常
-     * 规避百分号关键字解析报错，保留全部扩写、字数约束逻辑
+     * 优化升级版生成方法：强化个人文风、动态自适应分段、彻底修复格式报错
      */
     private static String generateReviewOnce(String title, int year, String source, int rewriteRound) throws IOException {
         // 差异化Prompt：首轮正常生成，后续轮次强制细节扩写、深化感受
         String extraRule = "";
         if (rewriteRound == 2) {
-            extraRule = "当前为第二轮重写，必须大幅扩写内容：细化观影情绪、补充生活共鸣细节、深化镜头氛围解读，严禁精简内容，务必填满1500字以上，杜绝短篇输出。";
+            extraRule = "当前为第二轮重写，必须大幅扩写个人感悟、细化生活共鸣细节，丰富心理描写与镜头解读，杜绝内容单薄，严格补足字数。";
         } else if (rewriteRound == 3) {
-            extraRule = "当前为第三轮强制扩写，必须极致填充细节：增加个人生活化感悟、细化人物心理刻画、拓展时代情绪共鸣，拉长段落表述，严格保证总字数不低于1500字，不超1800字。";
+            extraRule = "当前为第三轮强制扩写，极致填充私人化体验、细碎情绪、生活化细节，拉长段落感悟表述，保证文章饱满厚重，稳定达标1500字以上。";
         }
-        // 修复：拼接字符串替代String.format，彻底规避格式转换异常
-        String sysPrompt = "你是一位审美敏锐、风格私人化的独立电影博主，拒绝流水线模板影评，拒绝大段复述剧情，行文有个人温度与锋利的个体感受，不要写教科书式分析文。"
+        // 全新私人文风+动态分段核心规则，彻底告别千篇一律模板
+        String sysPrompt = "你是一位极具个人特色的小众独立影评博主，文风温柔细腻、自带烟火气、私人化、不大众化、不流水线、不堆砌辞藻。"
+                + "写作核心：拒绝全网通用影评套路，不用固定模板、不用套话空话、不用教科书式点评，以「普通人观影后的真实情绪独白」为核心，写独属于个人的观影感悟。"
                 + "今日影片：" + title + "（" + year + "）；选片来源：" + source + "。"
                 + "硬性写作规则（必须100%遵守）："
-                + "1、全文严格控制在【1500‑1800个中文字符】，必须达标下限，严禁不足字数，纯普通段落排版，不要标题、不要摘要、不要打分，禁止神作、封神、yyds这类网络烂词；"
-                + "2、强制多分段写作，全文固定分为7-8个自然段落，段落长短错落，避免整文扎堆，保证阅读层次感；"
-                + "3、剧情介绍只允许1-2句话，绝不占用主要篇幅，禁止复述完整故事线；"
-                + "4、以私人观影体感切入，重点细化被击中的瞬间、微小镜头细节、人物难言的处境，可写出疑惑、惋惜、不完全认同的多元观点，拒绝单一吹捧；"
-                + "5、深度挖掘人物内心褶皱、画面留白细节、镜头氛围、当下时代情绪，充分展开每一段感悟，杜绝内容单薄、语句简短；"
-                + "6、若是近期院线新片，重点结合当下年轻人职场、生活、内耗、治愈等现实处境强化共鸣；若是经典老片，深度剖析人性内核与时代生存烙印；"
-                + "7、行文松弛自然，有专属个人文风，杜绝所有模板套话，所有内容为原创私人观影感受，严禁精简、敷衍、水字数；"
-                + "8、每一段内容必须充分展开，细化心理活动、场景感受、自我共情思考，保证内容饱满厚重，稳稳达到1500字以上标准。"
+                + "1、全文严格控制在【1500‑1800个中文字符】，必须达标下限，严禁字数不足，纯段落排版，不要标题、不要摘要、不要打分、不要小结；"
+                + "2、【动态自适应分段】摒弃固定段落数量，根据全文内容自然拆分，内容饱满则多分小段、内容舒缓则适度合并，整体段落错落有致，排版自然舒适，杜绝扎堆大段；"
+                + "3、剧情介绍仅保留1-2句极简铺垫，绝不复述剧情、不剧透细节、不占用正文篇幅，核心全部为私人情绪、生活共鸣、细节解读、自我感悟；"
+                + "4、文风差异化要求：摒弃千篇一律的影评话术，多用个人视角的细碎感受、生活碎片、职场共情、日常情绪代入，文字松弛、真诚、有温度，自带个人专属风格，全网不撞文；"
+                + "5、允许写出多元观点：可以有惋惜、不解、轻微吐槽、自我和解、反向思考等真实主观情绪，拒绝单一吹捧、拒绝完美化评价，真实不刻意；"
+                + "6、深度挖掘镜头留白、人物隐性情绪、画面细节，结合当代年轻人内耗、通勤、独居、职场压力、乡愁等真实生活状态强化共鸣；"
+                + "7、杜绝所有网络烂词、营销式话术、模板化句式，不刻意拔高主题、不强行升华，保持自然独白感，像私人随笔一样真诚细腻；"
+                + "8、每段内容充分展开，细化心理活动、观影瞬间、生活联想，保证内容饱满厚重，稳稳达标字数区间，不敷衍、不精简。"
                 + extraRule;
         JSONObject reqBody = new JSONObject();
         reqBody.put("model", "deepseek-v4-flash");
         reqBody.put("max_tokens", MAX_OUTPUT_TOKENS);
-        // 微调参数，提升内容丰富度，避免简短输出
-        reqBody.put("temperature", 0.82);
-        reqBody.put("top_p", 0.92);
+        // 调高随机性，强化文风独特性，避免重复模板内容
+        reqBody.put("temperature", 0.88);
+        reqBody.put("top_p", 0.95);
         reqBody.put("extra_body", JSONObject.of("thinking", false));
         JSONArray msgs = new JSONArray();
         msgs.add(JSONObject.of("role", "system", "content", sysPrompt));
-        msgs.add(JSONObject.of("role","user","content","请严格遵守字数和分段规则，输出饱满、细节丰富、1500字以上的完整影评正文，禁止简短输出！"));
+        msgs.add(JSONObject.of("role","user","content","请严格遵守私人化文风、动态分段、字数约束规则，输出真诚独特、无模板、细节饱满的完整影评正文。"));
         reqBody.put("messages", msgs);
         int httpRetry = 2;
         Exception lastErr = null;
@@ -326,8 +327,8 @@ public class MovieBlogMain {
         }
         throw new IOException("写入Gist历史全部重试失败");
     }
-    // ============ 飞书卡片推送 ============
-    private static void sendFeishuCard(String title, int year, String source, String content) throws IOException {
+    // ============ 飞书卡片推送（新增字数展示、优化排版） ============
+    private static void sendFeishuCard(String title, int year, String source, String content, int contentLen) throws IOException {
         int previewMax = 450;
         String preview = content.length() > previewMax
                 ? content.substring(0, previewMax) + "\n……\n> 📄完整稿件请查看Action产物 movie_article.md"
@@ -337,8 +338,9 @@ public class MovieBlogMain {
         JSONObject cardBody = new JSONObject();
         cardBody.put("wide_screen_mode", true);
         JSONArray elements = new JSONArray();
+        // 新增字数统计展示
         elements.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md",
-                "content", String.format("**🎬今日影评：%s（%d）**\n选片来源：%s", title, year, source))));
+                "content", String.format("**🎬今日影评：%s（%d）**\n📌选片来源：%s\n📝文章字数：%d字符", title, year, source, contentLen))));
         elements.add(JSONObject.of("tag", "hr"));
         elements.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md", "content", preview)));
         cardBody.put("elements", elements);
