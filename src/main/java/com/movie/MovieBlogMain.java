@@ -18,10 +18,10 @@ public class MovieBlogMain {
     private static final String DEEPSEEK_API_KEY = System.getenv("DEEPSEEK_API_KEY");
     private static final String GH_PAT = System.getenv("GH_PAT");
     private static final String GIST_ID = System.getenv("GIST_ID");
-    private static final String FEISHU_WEBHOOK = System.getenv("FEISHU_WEBHOOK_MOVIE");
+    private static final String FEISHU_WEBHOOK_MOVIE = System.getenv("FEISHU_WEBHOOK_MOVIE");
 
     private static final String DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
-    private static final int MAX_OUTPUT_TOKENS = 2400;
+    private static final int MAX_OUTPUT_TOKENS = 2800;
     private static final int ARTICLE_MIN_LEN = 1500;
     private static final int ARTICLE_MAX_LEN = 1800;
     private static final int MAX_HISTORY_SIZE = 200;
@@ -51,7 +51,7 @@ public class MovieBlogMain {
               {"title":"寂静人生","year":2013},
               {"title":"秋日奏鸣曲","year":1978},
               {"title":"雾中风景","year":1988},
-              {"title":"小亚细亚往事","year":2011},
+              {"title":"安纳托利亚往事","year":2011},
               {"title":"四个春天","year":2017},
               {"title":"大象席地而坐","year":2018},
               {"title":"罗马","year":2018},
@@ -91,10 +91,10 @@ public class MovieBlogMain {
             // 本地落盘输出文件
             saveOutput(title, year, source, articleContent);
 
-            // 业务全部成功之后，写入Gist历史库，防止下次重复
+            // 业务全部成功之后，写入Gist历史库，防止下次重复选题
             appendToGistHistory(gistData, title, year, source);
 
-            // 推飞书（失败仅告警，不阻断）
+            // 推飞书（失败仅告警，不阻断主流程）
             try {
                 sendFeishuCard(title, year, source, articleContent);
                 System.out.println("✅飞书卡片推送完成");
@@ -115,7 +115,7 @@ public class MovieBlogMain {
         if (isBlank(DEEPSEEK_API_KEY)) throw new RuntimeException("缺少 DEEPSEEK_API_KEY");
         if (isBlank(GH_PAT)) throw new RuntimeException("缺少 GH_PAT");
         if (isBlank(GIST_ID)) throw new RuntimeException("缺少 GIST_ID");
-        if (isBlank(FEISHU_WEBHOOK)) throw new RuntimeException("缺少 FEISHU_WEBHOOK_MOVIE");
+        if (isBlank(FEISHU_WEBHOOK_MOVIE)) throw new RuntimeException("缺少 FEISHU_WEBHOOK_MOVIE");
     }
 
     private static void initDir() throws IOException {
@@ -165,7 +165,7 @@ public class MovieBlogMain {
         return pick;
     }
 
-    /** 调用DeepSeek生成影评，带强约束Prompt */
+    /** 调用DeepSeek‑V4‑Flash生成影评，关闭思考模式 */
     private static String generateReview(String title, int year, String source) throws IOException {
         String sysPrompt = String.format("""
                 你是一名独立深度电影博主，有稳定个人表达，拒绝网络影评套话，拒绝大段复述剧情。
@@ -173,7 +173,7 @@ public class MovieBlogMain {
                 硬性写作约束：
                 1.全文严格1500‑1800字，输出markdown格式；
                 2.以第一人称观影感受切入，少剧透；重点写镜头语言、人物内核、社会隐喻、个人思考；
-                3.禁止“封神”“神作”“yyds”泛滥网络词汇；不要简单打分评价好坏；
+                3.禁止“封神”“神作”“yyds”这类网络泛滥词汇；不要简单打分评价好坏；
                 4.文章结构：开篇观影感受引入 → 镜头/人物细读 → 现实延伸思考 → 结尾个人感悟；
                 5.严禁复制网上现成影评，全部使用自己语言重新组织，要有独特视角；
                 6.直接输出完整正文，不要摘要、不要说明性多余文字。
@@ -182,6 +182,8 @@ public class MovieBlogMain {
         JSONObject reqBody = new JSONObject();
         reqBody.put("model", "deepseek-v4-flash");
         reqBody.put("max_tokens", MAX_OUTPUT_TOKENS);
+        // 关闭思考模式，避免输出reasoning思考过程文本
+        reqBody.put("extra_body", JSONObject.of("thinking", false));
         JSONArray msgs = new JSONArray();
         msgs.add(JSONObject.of("role", "system", "content", sysPrompt));
         reqBody.put("messages", msgs);
@@ -199,12 +201,16 @@ public class MovieBlogMain {
                         .build();
                 try (Response resp = HTTP_CLIENT.newCall(req).execute()) {
                     String respStr = resp.body().string();
+                    System.out.println("===DeepSeek完整返回报文===\n" + respStr);
                     if (!resp.isSuccessful()) {
                         throw new IOException("DeepSeek http " + resp.code() + " " + respStr);
                     }
                     JSONObject respJson = JSONObject.parseObject(respStr);
                     String raw = respJson.getJSONArray("choices")
                             .getJSONObject(0).getJSONObject("message").getString("content");
+                    if (raw == null || raw.isBlank()) {
+                        throw new IOException("大模型返回content为空！");
+                    }
                     return cleanAiRaw(raw);
                 }
             } catch (Exception e) {
@@ -308,17 +314,20 @@ public class MovieBlogMain {
         JSONObject cardBody = new JSONObject();
         cardBody.put("wide_screen_mode", true);
         JSONArray elements = new JSONArray();
-        elements.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md",
-                "content", String.format("**🎬今日深度影评｜%s (%d)**\n选片来源：%s\n\n%s",
-                        title, year, source, preview))));
+        elements.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md", "content", String.format("**🎬今日影评：%s（%d）**\n选片来源：%s", title, year, source))));
+        elements.add(JSONObject.of("tag", "hr"));
+        elements.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md", "content", preview)));
         cardBody.put("elements", elements);
         card.put("card", cardBody);
 
-        RequestBody rb = RequestBody.create(card.toString(), MediaType.parse("application/json;charset=utf-8"));
-        Request req = new Request.Builder().url(FEISHU_WEBHOOK).post(rb).build();
+        RequestBody rb = RequestBody.create(card.toString(), MediaType.parse("application/json;charset=utf‑8"));
+        Request req = new Request.Builder()
+                .url(FEISHU_WEBHOOK_MOVIE)
+                .post(rb)
+                .build();
         try (Response resp = HTTP_CLIENT.newCall(req).execute()) {
             if (!resp.isSuccessful()) {
-                System.err.println("飞书http code=" + resp.code());
+                System.err.println("飞书推送http失败:"+resp.code());
             }
         }
     }
