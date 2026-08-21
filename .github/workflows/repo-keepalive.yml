@@ -3,7 +3,6 @@ on:
   schedule:
     - cron: '0 0 15 * *'
   workflow_dispatch:
-
 jobs:
   keep-alive:
     runs-on: ubuntu-latest
@@ -14,10 +13,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
-
       - name: 执行空提交保活
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           git config --global user.name "KeepAlive‑Bot"
           git config --global user.email "bot@no‑mail.example"
+          # 重写remote origin，把PAT嵌入url，push使用该token鉴权
+          git remote set-url origin https://${GH_PAT}@github.com/LiJiaLe-yolo/movie-daily.git
           git commit --allow-empty -m "chore: repo keep‑alive"
           git push
