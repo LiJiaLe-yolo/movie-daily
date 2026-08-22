@@ -14,9 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.LocalDate;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 public class MovieBlogMain {
@@ -37,13 +35,27 @@ public class MovieBlogMain {
     private static final String GIST_FILENAME = "movie_history.json";
     private static final String OUTPUT_DIR = "output";
 
-    // 经典影片兜底TAG池（无固定片名，仅无新片时启用）
+    // 经典影片兜底TAG池
     private static final String[] CLASSIC_TAGS = {
             "现实高分经典", "人性传世经典", "家庭治愈经典", "小众高分佳作",
             "情感深度经典", "文艺叙事经典", "国产优质佳作", "纪实温情经典",
             "现实深度佳作", "奥斯卡获奖经典", "人性博弈经典", "治愈系高分经典",
             "青春爱情经典", "逆袭励志经典", "年代传世佳作", "小众文艺热片"
     };
+
+    // 【核心新增】经典兜底影片轮询库（全覆盖、高频不重复、全网素材充足、真实年份）
+    private static final List<Map<String,Object>> CLASSIC_MOVIE_POOL;
+    static {
+        CLASSIC_MOVIE_POOL = new ArrayList<>();
+        CLASSIC_MOVIE_POOL.add(Map.of("title","活着","year",1994,"tag","人性传世经典、现实高分经典","reason","国产顶级现实经典，素材充足，适配长效流量"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title","霸王别姬","year",1993,"tag","影史封神经典、时代叙事经典","reason","华语影史天花板，解读角度极多，流量稳定"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title","阿甘正传","year",1994,"tag","励志传世经典、人生治愈经典","reason","全球高分常青佳作，受众极广，长尾流量充足"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title","肖申克的救赎","year",1994,"tag","人性博弈经典、逆袭励志经典","reason","影史高分榜首，常年热搜，可深度解读维度丰富"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title","山海情","year",2021,"tag","现实纪实经典、家国温情佳作","reason","国产高分现实题材，口碑过硬，适配大众共鸣流量"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title","你好，李焕英","year",2021,"tag","家庭治愈经典、温情现实佳作","reason","国民级温情影片，受众广泛，讨论度持久"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title","千与千寻","year",2001,"tag","治愈文艺经典、成长寓言佳作","reason","日系传世动画，常年有搜索流量，解读维度丰富"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title","寻梦环游记","year",2017,"tag","亲情治愈经典、奇幻温情佳作","reason","亲情治愈顶流动画，大众好感度高，适配自媒体流量"));
+    }
 
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient.Builder()
             .connectTimeout(25, TimeUnit.SECONDS)
@@ -56,7 +68,7 @@ public class MovieBlogMain {
         try {
             checkEnv();
             initDir();
-            System.out.println("=====【终极保真版】真实年份校验+杜绝幻觉+稳扩写任务启动=====");
+            System.out.println("=====【终极防重复+保真版】兜底轮询+杜绝幻觉+稳扩写任务启动=====");
 
             // 自动季节档期识别
             String currentSeason = getCurrentSeason();
@@ -162,7 +174,7 @@ public class MovieBlogMain {
         Files.createDirectories(Paths.get(OUTPUT_DIR));
     }
 
-    // 【核心终极修复】强制真实年份+杜绝AI虚构、幻觉、乱改上映年份
+    // 【核心终极修复】AI选片+兜底轮询防重复+强制真实年份、杜绝AI幻觉
     private static JSONObject autoPickMovieByAI(JSONArray usedMovies, String season, String fileStage, int currentYear) throws IOException {
         Set<String> usedKeySet = new HashSet<>();
         for (Object o : usedMovies) {
@@ -180,8 +192,8 @@ public class MovieBlogMain {
                 + "第一优先级（必选）：优先挑选【本年度、近3个月内上映】、全网有充足影评素材、剧情饱满、可深度解读的院线/网络真实新片，满足任意2个热度条件："
                 + "1.全网有热搜、话题、高讨论度；2.头条/抖音有稳定搜索流量；3.影视热度榜单上榜；4.档期热门影片。"
                 + "严禁选择冷门新片、无资料新片、虚构影片、AI无法扩写的小众短片/纪录片！禁止优先选择往年老片！"
-                + "第二优先级（仅无合格新片时启用）：若全网无符合条件、有充足素材的本年度近期真实热片，再从以下经典标签中挑选高分长效真实经典影片：" + tagList + "。"
-                + "【去重约束】绝对禁止选择以下已创作过的影片：" + usedKeySet
+                + "第二优先级（仅无合格新片时启用）：若全网无符合条件、有充足素材的本年度近期真实热片，再挑选高分长效真实经典影片。"
+                + "【去重铁律】绝对禁止选择以下已创作过的影片：" + usedKeySet
                 + "【返回规范】严格输出纯JSON，无多余文字、无解释、无markdown，字段全部真实可查，必填："
                 + "{\"title\":\"真实影片名\",\"year\":\"真实官方上映年份\",\"tag\":\"影片对应标签\",\"reason\":\"严格按优先级说明真实选片依据\",\"source\":\"本年度近期热点流量影片/无新片兜底经典长尾影片\"}";
 
@@ -190,19 +202,44 @@ public class MovieBlogMain {
         for (int i = 0; i < 3; i++) {
             aiResult = callAIPickMovie(aiPickPrompt);
             if (aiResult != null && !isBlank(aiResult.getString("title")) && aiResult.getIntValue("year") > 0) {
-                return aiResult;
+                // AI选片结果二次去重，避免重复
+                String checkKey = aiResult.getString("title") + "|" + aiResult.getIntValue("year");
+                if (!usedKeySet.contains(checkKey)) {
+                    return aiResult;
+                }
+                System.out.printf("⚠️第%d轮AI选片命中历史影片，跳过重试...%n", i + 1);
             }
             System.out.printf("⚠️第%d轮AI选片返回空/异常，重试中...%n", i + 1);
             sleepMs(3000);
         }
 
-        // 终极兜底：接口异常时启用经典片兜底（真实影片）
-        System.out.println("🔥AI接口重试失败，触发本地终极经典影片兜底机制");
+        // 【核心修复】AI接口失败，启用【去重随机兜底池】，不再固定活着！
+        System.out.println("🔥AI接口重试失败，触发本地经典影片轮询兜底机制（自动去重）");
+        // 筛选出未使用过的经典影片
+        List<Map<String,Object>> availableClassic = new ArrayList<>();
+        for (Map<String,Object> movie : CLASSIC_MOVIE_POOL) {
+            String key = movie.get("title") + "|" + movie.get("year");
+            if (!usedKeySet.contains(key)) {
+                availableClassic.add(movie);
+            }
+        }
+
+        // 若所有经典都用过，清空最早记录（兜底容错）
+        if (availableClassic.isEmpty()) {
+            System.out.println("⚠️所有经典影片已轮询完毕，重启轮询池");
+            availableClassic = new ArrayList<>(CLASSIC_MOVIE_POOL);
+        }
+
+        // 随机选取不重复经典影片
+        Random random = new Random();
+        Map<String,Object> randomMovie = availableClassic.get(random.nextInt(availableClassic.size()));
+
+        // 封装返回
         JSONObject fallbackMovie = new JSONObject();
-        fallbackMovie.put("title", "活着");
-        fallbackMovie.put("year", 1994);
-        fallbackMovie.put("tag", "人性传世经典、现实高分经典");
-        fallbackMovie.put("reason", "无本年度近期热门新片，兜底选用全网高分传世经典，素材充足，适配头条长效流量");
+        fallbackMovie.put("title", randomMovie.get("title"));
+        fallbackMovie.put("year", randomMovie.get("year"));
+        fallbackMovie.put("tag", randomMovie.get("tag"));
+        fallbackMovie.put("reason", randomMovie.get("reason") + "，AI新片选片异常，启用轮询兜底机制，规避影片重复");
         fallbackMovie.put("source", "无新片兜底经典长尾影片");
         return fallbackMovie;
     }
@@ -217,7 +254,7 @@ public class MovieBlogMain {
             reqBody.put("top_p", 0.9);
 
             JSONArray msgs = new JSONArray();
-            msgs.add(JSONObject.of("role", "system", "content", "你是专业影视流量分析师，【零幻觉、零虚构、零篡改】，只输出全网可查的真实影片名称、真实上映年份，严格遵守新片优先规则，仅返回标准JSON数据，无任何多余内容。"));
+            msgs.add(JSONObject.of("role", "system", "content", "你是专业影视流量分析师，【零幻觉、零虚构、零篡改】，只输出全网可查的真实影片名称、真实上映年份，严格遵守新片优先、严格去重规则，仅返回标准JSON数据，无任何多余内容。"));
             msgs.add(JSONObject.of("role", "user", "content", prompt));
             reqBody.put("messages", msgs);
 
