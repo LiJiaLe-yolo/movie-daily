@@ -36,7 +36,7 @@ public class MovieBlogMain {
     private static final String GIST_FILENAME = "movie_history.json";
     private static final String OUTPUT_DIR = "output";
 
-    // 经典影片兜底TAG池（无固定片名，AI全网自选，永不枯竭）
+    // 经典影片兜底TAG池（无固定片名，仅无新片时启用）
     private static final String[] CLASSIC_TAGS = {
             "现实高分经典", "人性传世经典", "家庭治愈经典", "小众高分佳作",
             "情感深度经典", "文艺叙事经典", "国产优质佳作", "纪实温情经典",
@@ -55,19 +55,20 @@ public class MovieBlogMain {
         try {
             checkEnv();
             initDir();
-            System.out.println("=====【终极稳跑版】容错增强+稳定扩写任务启动=====");
+            System.out.println("=====【严格优先级版】新片优先+经典兜底任务启动=====");
 
             // 自动季节档期识别
             String currentSeason = getCurrentSeason();
             String currentFileStage = getCurrentMovieFileStage();
-            System.out.printf("✅系统自动识别当前季节：%s｜当前影视档期：%s%n", currentSeason, currentFileStage);
+            int currentYear = LocalDate.now().getYear();
+            System.out.printf("✅系统自动识别：当前年份%d｜季节：%s｜档期：%s%n", currentYear, currentSeason, currentFileStage);
 
             JSONObject gistData = safeReadGist();
             JSONArray usedMovies = gistData.getJSONArray("used_movies");
             System.out.printf("读取全局去重片库：%d条%n", usedMovies.size());
 
-            // 容错增强选片
-            JSONObject selectMovie = autoPickMovieByAI(usedMovies, currentSeason, currentFileStage);
+            // 严格优先级选片：新片热片优先，无则经典兜底
+            JSONObject selectMovie = autoPickMovieByAI(usedMovies, currentSeason, currentFileStage, currentYear);
             String title = selectMovie.getString("title");
             int year = selectMovie.getIntValue("year");
             String source = selectMovie.getString("source");
@@ -82,7 +83,7 @@ public class MovieBlogMain {
             System.out.printf("📝影评生成完成，字数：%d%n", articleLen);
 
             // 字数校验
-            if (articleLen < ARTICLE_MIN_LEN || articleLen > ARTICLE_MAX_LEN) {
+            if (articleLen< ARTICLE_MIN_LEN || articleLen > ARTICLE_MAX_LEN) {
                 throw new RuntimeException("字数不达标：" + articleLen);
             }
 
@@ -138,8 +139,8 @@ public class MovieBlogMain {
         Files.createDirectories(Paths.get(OUTPUT_DIR));
     }
 
-    // 【彻底修复空指针】多层判空+接口重试+异常兜底，杜绝aiResult=null崩溃
-    private static JSONObject autoPickMovieByAI(JSONArray usedMovies, String season, String fileStage) throws IOException {
+    // 【核心重构】严格优先级：本年度近期热片优先，彻底无新片才走经典TAG兜底
+    private static JSONObject autoPickMovieByAI(JSONArray usedMovies, String season, String fileStage, int currentYear) throws IOException {
         Set<String> usedKeySet = new HashSet<>();
         for (Object o : usedMovies) {
             JSONObject jo = (JSONObject) o;
@@ -147,21 +148,21 @@ public class MovieBlogMain {
         }
         String tagList = String.join("、", CLASSIC_TAGS);
 
-        String aiPickPrompt = "你是头条影视自媒体流量选片专家，当前时间：" + season + "，当前影视档期：" + fileStage + "。"
-                + "一、热点影片筛选标准（满足任意2条即为有效流量热片）："
-                + "1.近2个月院线/网络上新影片；2.全网有热搜、话题、高讨论度；3.头条/抖音有稳定用户搜索流量；4.各大影视热度榜单上榜。"
-                + "优先筛选1部未创作过的近期高流量热片。"
-                + "二、若无符合条件的热点新片，执行经典兜底规则："
-                + "从全网高分、长效流量、适合头条影评二次传播的优质经典电影中，随机挑选一部，严格匹配以下标签品类：" + tagList + "。"
-                + "三、硬性约束：绝对禁止选择以下已创作过的影片，永久去重：" + usedKeySet
-                + "四、返回规范：严格输出纯JSON，无多余文字、无解释、无markdown格式，字段必填："
-                + "{\"title\":\"影片名\",\"year\":\"上映年份\",\"tag\":\"匹配上述经典标签/热点影片标签\",\"reason\":\"选片依据\",\"source\":\"近期热点流量影片/AI标签兜底经典长尾影片\"}";
+        // 严格优先级规则：新片绝对优先，杜绝优先选往年老片
+        String aiPickPrompt = "你是头条影视自媒体流量选片专家，当前年份：" + currentYear + "，当前时间：" + season + "，当前影视档期：" + fileStage + "。"
+                + "【硬性强制优先级规则，必须严格遵守】"
+                + "第一优先级（必选）：优先挑选【本年度、近3个月内上映】的院线/网络新片，满足任意2个热度条件："
+                + "1.全网有热搜、话题、高讨论度；2.头条/抖音有稳定搜索流量；3.影视热度榜单上榜；4.档期热门影片。"
+                + "优先选择本年度当期档期热片，禁止优先选择往年老片！"
+                + "第二优先级（仅无新片时启用）：若全网无符合条件的本年度近期热片，再从以下经典标签中挑选高分长效经典影片：" + tagList + "。"
+                + "【去重约束】绝对禁止选择以下已创作过的影片：" + usedKeySet
+                + "【返回规范】严格输出纯JSON，无多余文字、无解释、无markdown，字段必填："
+                + "{\"title\":\"影片名\",\"year\":\"上映年份\",\"tag\":\"影片对应标签\",\"reason\":\"严格按优先级说明选片依据\",\"source\":\"本年度近期热点流量影片/无新片兜底经典长尾影片\"}";
 
         // 多次重试+严格判空
         JSONObject aiResult = null;
         for (int i = 0; i < 3; i++) {
             aiResult = callAIPickMovie(aiPickPrompt);
-            // 有效结果直接放行
             if (aiResult != null && !isBlank(aiResult.getString("title")) && aiResult.getIntValue("year") > 0) {
                 return aiResult;
             }
@@ -169,14 +170,14 @@ public class MovieBlogMain {
             sleepMs(3000);
         }
 
-        // 终极兜底：接口全部异常时，本地固定高分经典兜底，彻底杜绝任务崩溃
-        System.out.println("🔥AI接口重试失败，触发本地终极影片兜底机制");
+        // 终极兜底：接口异常时启用经典片兜底
+        System.out.println("🔥AI接口重试失败，触发本地终极经典影片兜底机制");
         JSONObject fallbackMovie = new JSONObject();
         fallbackMovie.put("title", "活着");
         fallbackMovie.put("year", 1994);
         fallbackMovie.put("tag", "人性传世经典、现实高分经典");
-        fallbackMovie.put("reason", "全网顶流高分传世经典，长效搜索流量极高，适配头条长期收录");
-        fallbackMovie.put("source", "AI兜底应急经典长尾影片");
+        fallbackMovie.put("reason", "无本年度近期热门新片，兜底选用全网高分传世经典，适配头条长效流量");
+        fallbackMovie.put("source", "无新片兜底经典长尾影片");
         return fallbackMovie;
     }
 
@@ -190,7 +191,7 @@ public class MovieBlogMain {
             reqBody.put("top_p", 0.95);
 
             JSONArray msgs = new JSONArray();
-            msgs.add(JSONObject.of("role", "system", "content", "你是专业影视流量分析师，严格按标签和热度规则选片，仅返回标准JSON数据，无任何多余内容。"));
+            msgs.add(JSONObject.of("role", "system", "content", "你是专业影视流量分析师，严格遵守【新片优先、经典兜底】优先级，仅返回标准JSON数据，无任何多余内容。"));
             msgs.add(JSONObject.of("role", "user", "content", prompt));
             reqBody.put("messages", msgs);
 
@@ -250,8 +251,8 @@ public class MovieBlogMain {
         }
 
         String flowTip = source.contains("热点")
-                ? "本片为当下全网热门新片，贴合当期档期热点、大众情绪，适配短期爆发流量。"
-                : "本片为高分经典影片，深挖内核与时代共鸣，适配头条长期搜索长尾流量。";
+                ? "本片为本年度近期热门新片，贴合当期档期热点、大众情绪，适配头条短期爆发流量。"
+                : "本年度无优质热门新片，选用高分经典影片，深挖内核与时代共鸣，适配头条长期搜索长尾流量。";
 
         String sysPrompt = "你是头条小众独立影评博主，固定【温柔细腻、清醒思辨、真诚有温度】的专属个人风格，无模板、无流水线、无烂大街话术。"
                 + "评析影片：" + title + "(" + year + ")｜流量属性：" + source + "｜影片标签：" + tag + "｜选片依据：" + reason + flowTip
@@ -369,7 +370,7 @@ public class MovieBlogMain {
 
     // 飞书分片推送
     private static void sendFeishuFullCardArticle(String title, int year, String source, String tag, String reason, String content, int len) throws IOException {
-        String header = String.format("🎬AI标签智能选片·头条长效影评\n影片：%s（%d）\n流量类型：%s\n影片标签：%s\n选片依据：%s\n文章字数：%d\n——————————\n",
+        String header = String.format("🎬AI严格优先级选片·头条长效影评\n影片：%s（%d）\n流量类型：%s\n影片标签：%s\n选片依据：%s\n文章字数：%d\n——————————\n",
                 title, year, source, tag, reason, len);
         sendFeishuChunk(header);
         for (int i = 0; i < content.length(); i += 1200) {
