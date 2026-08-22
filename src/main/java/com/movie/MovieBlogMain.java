@@ -1,4 +1,3 @@
-无非法字符·纯净可编译最终版代码
 package com.movie;
 
 import com.alibaba.fastjson2.JSON;
