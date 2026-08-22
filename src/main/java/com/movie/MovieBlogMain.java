@@ -1,3 +1,4 @@
+【终极单卡推送版】飞书合并单卡片+防重复+保真无幻觉稳定代码
 package com.movie;
 
 import com.alibaba.fastjson2.JSON;
@@ -68,7 +69,7 @@ public class MovieBlogMain {
         try {
             checkEnv();
             initDir();
-            System.out.println("=====【终极防重复+保真版】兜底轮询+杜绝幻觉+稳扩写任务启动=====");
+            System.out.println("=====【终极单卡推送版】飞书单卡+兜底轮询+杜绝幻觉任务启动=====");
 
             // 自动季节档期识别
             String currentSeason = getCurrentSeason();
@@ -126,12 +127,12 @@ public class MovieBlogMain {
             saveOutput(title, year, source, movieTag, selectReason, articleContent);
             appendToGistHistory(gistData, title, year, source, movieTag, selectReason);
 
-            // 飞书推送容错
+            // 【核心优化】全程仅推送**单张飞书卡片**，不再分片刷屏
             try {
-                sendFeishuFullCardArticle(title, year, source, movieTag, selectReason, articleContent, articleLen);
-                System.out.println("✅全文推送成功！任务正常完成");
+                sendFeishuSingleCardArticle(title, year, source, movieTag, selectReason, articleContent, articleLen);
+                System.out.println("✅全文单卡推送成功！任务正常完成");
             } catch (Exception e) {
-                System.err.println("⚠️飞书推送异常：" + e.getMessage());
+                System.err.println("⚠️飞书单卡推送异常：" + e.getMessage());
             }
 
             System.out.println("=====今日全自动影评任务圆满完成=====");
@@ -434,28 +435,29 @@ public class MovieBlogMain {
         throw new IOException("写入GIST历史库失败");
     }
 
-    // 飞书分片推送
-    private static void sendFeishuFullCardArticle(String title, int year, String source, String tag, String reason, String content, int len) throws IOException {
-        String header = String.format("🎬AI严格保真选片·头条长效影评\n影片：%s（%d）\n流量类型：%s\n影片标签：%s\n选片依据：%s\n文章字数：%d\n——————————\n",
-                title, year, source, tag, reason, len);
-        sendFeishuChunk(header);
-        for (int i = 0; i < content.length(); i += 1200) {
-            int end = Math.min(i + 1200, content.length());
-            sendFeishuChunk(content.substring(i, end));
-            sleepMs(300);
-        }
-    }
+    // 【彻底重构】飞书**单张卡片完整推送**，取消分片、无多卡片刷屏
+    private static void sendFeishuSingleCardArticle(String title, int year, String source, String tag, String reason, String content, int len) throws IOException {
+        // 整合头部信息+完整影评正文，一次性拼接完毕
+        StringBuilder fullText = new StringBuilder();
+        fullText.append(String.format("🎬AI严格保真选片·头条长效影评\n影片：%s（%d）\n流量类型：%s\n影片标签：%s\n选片依据：%s\n文章字数：%d\n——————————\n\n",
+                title, year, source, tag, reason, len));
+        fullText.append(content);
 
-    private static void sendFeishuChunk(String text) throws IOException {
+        // 构建单张完整交互卡片
         JSONObject payload = new JSONObject();
         payload.put("msg_type", "interactive");
         JSONObject card = new JSONObject();
         card.put("wide_screen_mode", true);
-        JSONArray ele = new JSONArray();
-        ele.add(JSONObject.of("tag", "div", "text", JSONObject.of("tag", "lark_md", "content", text)));
-        card.put("elements", ele);
+        JSONArray elements = new JSONArray();
+        // 唯一内容区块，容纳全部文本
+        elements.add(JSONObject.of(
+                "tag", "div",
+                "text", JSONObject.of("tag", "lark_md", "content", fullText.toString())
+        ));
+        card.put("elements", elements);
         payload.put("card", card);
 
+        // 仅一次网络请求，单卡推送完成
         RequestBody body = RequestBody.create(payload.toString(), MediaType.parse("application/json;charset=utf-8"));
         HTTP_CLIENT.newCall(new Request.Builder().url(FEISHU_WEBHOOK_MOVIE).post(body).build()).execute();
     }
