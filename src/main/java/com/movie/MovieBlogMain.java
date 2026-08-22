@@ -1,4 +1,4 @@
-【终极单卡推送版】飞书合并单卡片+防重复+保真无幻觉稳定代码
+纯净可编译版｜飞书单卡片推送+影片轮询防重复影评代码
 package com.movie;
 
 import com.alibaba.fastjson2.JSON;
@@ -44,7 +44,7 @@ public class MovieBlogMain {
             "青春爱情经典", "逆袭励志经典", "年代传世佳作", "小众文艺热片"
     };
 
-    // 【核心新增】经典兜底影片轮询库（全覆盖、高频不重复、全网素材充足、真实年份）
+    // 经典兜底影片轮询库（防重复、素材充足、真实年份）
     private static final List<Map<String,Object>> CLASSIC_MOVIE_POOL;
     static {
         CLASSIC_MOVIE_POOL = new ArrayList<>();
@@ -69,7 +69,7 @@ public class MovieBlogMain {
         try {
             checkEnv();
             initDir();
-            System.out.println("=====【终极单卡推送版】飞书单卡+兜底轮询+杜绝幻觉任务启动=====");
+            System.out.println("===== 单卡推送+兜底轮询+杜绝幻觉任务启动 =====");
 
             // 自动季节档期识别
             String currentSeason = getCurrentSeason();
@@ -127,7 +127,7 @@ public class MovieBlogMain {
             saveOutput(title, year, source, movieTag, selectReason, articleContent);
             appendToGistHistory(gistData, title, year, source, movieTag, selectReason);
 
-            // 【核心优化】全程仅推送**单张飞书卡片**，不再分片刷屏
+            // 飞书单卡片推送（无分片）
             try {
                 sendFeishuSingleCardArticle(title, year, source, movieTag, selectReason, articleContent, articleLen);
                 System.out.println("✅全文单卡推送成功！任务正常完成");
@@ -175,7 +175,7 @@ public class MovieBlogMain {
         Files.createDirectories(Paths.get(OUTPUT_DIR));
     }
 
-    // 【核心终极修复】AI选片+兜底轮询防重复+强制真实年份、杜绝AI幻觉
+    // AI选片+兜底轮询防重复+强制真实年份、杜绝AI幻觉
     private static JSONObject autoPickMovieByAI(JSONArray usedMovies, String season, String fileStage, int currentYear) throws IOException {
         Set<String> usedKeySet = new HashSet<>();
         for (Object o : usedMovies) {
@@ -184,7 +184,6 @@ public class MovieBlogMain {
         }
         String tagList = String.join("、", CLASSIC_TAGS);
 
-        // 【强制保真核心规则】严禁虚构影片、严禁乱改上映年份、只输出全网可查真实影片数据
         String aiPickPrompt = "你是头条影视自媒体流量选片专家，当前年份：" + currentYear + "，当前时间：" + season + "，当前影视档期：" + fileStage + "。"
                 + "【最高优先级·强制保真铁律，违规直接作废】"
                 + "1、所有输出的影片名称、上映年份、热度信息必须是全网可查的真实官方数据，严禁AI虚构、严禁篡改上映年份、严禁编造热度！"
@@ -214,9 +213,8 @@ public class MovieBlogMain {
             sleepMs(3000);
         }
 
-        // 【核心修复】AI接口失败，启用【去重随机兜底池】，不再固定活着！
+        // AI接口失败，启用去重随机兜底池
         System.out.println("🔥AI接口重试失败，触发本地经典影片轮询兜底机制（自动去重）");
-        // 筛选出未使用过的经典影片
         List<Map<String,Object>> availableClassic = new ArrayList<>();
         for (Map<String,Object> movie : CLASSIC_MOVIE_POOL) {
             String key = movie.get("title") + "|" + movie.get("year");
@@ -225,17 +223,15 @@ public class MovieBlogMain {
             }
         }
 
-        // 若所有经典都用过，清空最早记录（兜底容错）
+        // 若所有经典都用过，清空最早记录重启轮询
         if (availableClassic.isEmpty()) {
             System.out.println("⚠️所有经典影片已轮询完毕，重启轮询池");
             availableClassic = new ArrayList<>(CLASSIC_MOVIE_POOL);
         }
 
-        // 随机选取不重复经典影片
         Random random = new Random();
         Map<String,Object> randomMovie = availableClassic.get(random.nextInt(availableClassic.size()));
 
-        // 封装返回
         JSONObject fallbackMovie = new JSONObject();
         fallbackMovie.put("title", randomMovie.get("title"));
         fallbackMovie.put("year", randomMovie.get("year"));
@@ -245,17 +241,17 @@ public class MovieBlogMain {
         return fallbackMovie;
     }
 
-    // AI选片专用接口调用（增强保真容错）
+    // AI选片接口调用
     private static JSONObject callAIPickMovie(String prompt) {
         try {
             JSONObject reqBody = new JSONObject();
             reqBody.put("model", "deepseek-v4-flash");
             reqBody.put("max_tokens", 1024);
-            reqBody.put("temperature", 0.7); // 降低随机性，杜绝虚构错误
+            reqBody.put("temperature", 0.7);
             reqBody.put("top_p", 0.9);
 
             JSONArray msgs = new JSONArray();
-            msgs.add(JSONObject.of("role", "system", "content", "你是专业影视流量分析师，【零幻觉、零虚构、零篡改】，只输出全网可查的真实影片名称、真实上映年份，严格遵守新片优先、严格去重规则，仅返回标准JSON数据，无任何多余内容。"));
+            msgs.add(JSONObject.of("role", "system", "content", "你是专业影视流量分析师，零幻觉、零虚构、零篡改，只输出全网可查真实影片，严格新片优先、严格去重，仅返回标准JSON。"));
             msgs.add(JSONObject.of("role", "user", "content", prompt));
             reqBody.put("messages", msgs);
 
@@ -283,37 +279,34 @@ public class MovieBlogMain {
         }
     }
 
-    // 多层防空+强制重选片，杜绝空内容卡死任务
+    // 多层重写容错，杜绝空内容
     private static String generateReviewWithRewrite(String title, int year, String source, String tag, String reason) throws IOException {
         for (int round = 1; round <= MAX_REWRITE_TIMES; round++) {
             String content = generateReviewOnce(title, year, source, tag, reason, round);
-            // 严格拦截空内容、空白内容、过短内容
             if (content == null || content.isBlank() || content.length() < 100) {
                 System.out.printf("⚠️第%d轮生成内容为空/过短，重新生成%n", round);
                 sleepMs(3000);
                 continue;
             }
             int len = content.length();
-            // 宽松字数适配，优先保证有内容输出
             if (len >= 1200 && len <= 2000) {
                 return content;
             }
             System.out.printf("⚠️字数小幅偏差（%d字），第%d轮重新扩写优化%n", len, round);
             sleepMs(3000);
         }
-        // 重写失败直接抛出，触发外层重选片机制
         throw new IOException("当前影片素材不足，多轮重写失败，需要更换影片");
     }
 
-    // 梯度扩写提示词，强化真实素材适配，杜绝空输出、虚假内容
+    // 影评正文生成
     private static String generateReviewOnce(String title, int year, String source, String tag, String reason, int rewriteRound) throws IOException {
         String extraRule = "";
         if (rewriteRound == 1) {
             extraRule = "完整深度创作，内容饱满详实，稳定输出1400字以上，严禁空白、严禁简短敷衍、严禁内容截断、严禁虚假剧情解读。";
         } else if (rewriteRound == 2) {
-            extraRule = "大幅细化扩写，补充真实人物细节、官方剧情、真实社会背景、观众共鸣、现实延伸，稳固字数，文风统一，绝对禁止空内容、虚假内容。";
+            extraRule = "大幅细化扩写，补充真实人物细节、官方剧情、真实社会背景、观众共鸣、现实延伸，稳固字数，文风统一。";
         } else {
-            extraRule = "终极精细化扩容，多角度真实思辨解读、影片官方价值剖析、时代背景延伸，严格贴近1400-1800字，只扩不删，杜绝空白、杜绝虚构解读。";
+            extraRule = "终极精细化扩容，多角度真实思辨解读、影片官方价值剖析、时代背景延伸，严格贴近1400-1800字，只扩不删。";
         }
 
         String flowTip = source.contains("热点")
@@ -435,21 +428,18 @@ public class MovieBlogMain {
         throw new IOException("写入GIST历史库失败");
     }
 
-    // 【彻底重构】飞书**单张卡片完整推送**，取消分片、无多卡片刷屏
+    // 飞书【单张卡片一次性推送】彻底解决多卡片刷屏
     private static void sendFeishuSingleCardArticle(String title, int year, String source, String tag, String reason, String content, int len) throws IOException {
-        // 整合头部信息+完整影评正文，一次性拼接完毕
         StringBuilder fullText = new StringBuilder();
         fullText.append(String.format("🎬AI严格保真选片·头条长效影评\n影片：%s（%d）\n流量类型：%s\n影片标签：%s\n选片依据：%s\n文章字数：%d\n——————————\n\n",
                 title, year, source, tag, reason, len));
         fullText.append(content);
 
-        // 构建单张完整交互卡片
         JSONObject payload = new JSONObject();
         payload.put("msg_type", "interactive");
         JSONObject card = new JSONObject();
         card.put("wide_screen_mode", true);
         JSONArray elements = new JSONArray();
-        // 唯一内容区块，容纳全部文本
         elements.add(JSONObject.of(
                 "tag", "div",
                 "text", JSONObject.of("tag", "lark_md", "content", fullText.toString())
@@ -457,7 +447,6 @@ public class MovieBlogMain {
         card.put("elements", elements);
         payload.put("card", card);
 
-        // 仅一次网络请求，单卡推送完成
         RequestBody body = RequestBody.create(payload.toString(), MediaType.parse("application/json;charset=utf-8"));
         HTTP_CLIENT.newCall(new Request.Builder().url(FEISHU_WEBHOOK_MOVIE).post(body).build()).execute();
     }
