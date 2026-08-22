@@ -27,13 +27,11 @@ public class MovieBlogMain {
     private static final String FEISHU_WEBHOOK_MOVIE = System.getenv("FEISHU_WEBHOOK_MOVIE");
     private static final String DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
-    // 字数区间：1400-1800 稳定适配AI输出（新增兜底宽松阈值）
+    // 字数区间：1400-1800 稳定适配AI输出（宽松容错）
     private static final int MAX_OUTPUT_TOKENS = 4000;
     private static final int ARTICLE_MIN_LEN = 1400;
     private static final int ARTICLE_MAX_LEN = 1800;
-    // 空内容重写最大次数
     private static final int MAX_REWRITE_TIMES = 3;
-    // 空内容触发重选片最大次数
     private static final int MAX_RESELECT_TIMES = 2;
     private static final int MAX_HISTORY_SIZE = 500;
     private static final String GIST_FILENAME = "movie_history.json";
@@ -58,7 +56,7 @@ public class MovieBlogMain {
         try {
             checkEnv();
             initDir();
-            System.out.println("=====【终极修复版】新片优先+空内容自救+稳扩写任务启动=====");
+            System.out.println("=====【终极保真版】真实年份校验+杜绝幻觉+稳扩写任务启动=====");
 
             // 自动季节档期识别
             String currentSeason = getCurrentSeason();
@@ -73,7 +71,6 @@ public class MovieBlogMain {
             // 支持空内容重选片容错
             JSONObject selectMovie = null;
             String articleContent = null;
-            // 最多重选2次片，彻底规避新片无素材无法生成的问题
             for (int reSelect = 0; reSelect <= MAX_RESELECT_TIMES; reSelect++) {
                 selectMovie = autoPickMovieByAI(usedMovies, currentSeason, currentFileStage, currentYear);
                 String title = selectMovie.getString("title");
@@ -88,7 +85,6 @@ public class MovieBlogMain {
                 // 尝试生成影评
                 try {
                     articleContent = generateReviewWithRewrite(title, year, source, movieTag, selectReason);
-                    // 生成成功直接跳出循环
                     break;
                 } catch (Exception e) {
                     System.out.printf("⚠️当前影片生成失败，触发第%d次重选片机制%n", reSelect + 1);
@@ -166,7 +162,7 @@ public class MovieBlogMain {
         Files.createDirectories(Paths.get(OUTPUT_DIR));
     }
 
-    // 【核心修复】严格优先级：本年度近3个月新片优先，无素材自动重选片
+    // 【核心终极修复】强制真实年份+杜绝AI虚构、幻觉、乱改上映年份
     private static JSONObject autoPickMovieByAI(JSONArray usedMovies, String season, String fileStage, int currentYear) throws IOException {
         Set<String> usedKeySet = new HashSet<>();
         for (Object o : usedMovies) {
@@ -175,16 +171,19 @@ public class MovieBlogMain {
         }
         String tagList = String.join("、", CLASSIC_TAGS);
 
-        // 优化提示词：禁止选择无剧情、无素材、无法扩写的新片，优先选择有大量影评素材的热门影片
+        // 【强制保真核心规则】严禁虚构影片、严禁乱改上映年份、只输出全网可查真实影片数据
         String aiPickPrompt = "你是头条影视自媒体流量选片专家，当前年份：" + currentYear + "，当前时间：" + season + "，当前影视档期：" + fileStage + "。"
-                + "【硬性强制优先级规则，必须严格遵守】"
-                + "第一优先级（必选）：优先挑选【本年度、近3个月内上映】、全网有充足影评素材、剧情饱满、可深度解读的院线/网络新片，满足任意2个热度条件："
+                + "【最高优先级·强制保真铁律，违规直接作废】"
+                + "1、所有输出的影片名称、上映年份、热度信息必须是全网可查的真实官方数据，严禁AI虚构、严禁篡改上映年份、严禁编造热度！"
+                + "2、例：《哪吒之魔童闹海》真实上映年份为2025年，绝对禁止输出2026、2024等错误年份！"
+                + "【选片优先级严格锁定】"
+                + "第一优先级（必选）：优先挑选【本年度、近3个月内上映】、全网有充足影评素材、剧情饱满、可深度解读的院线/网络真实新片，满足任意2个热度条件："
                 + "1.全网有热搜、话题、高讨论度；2.头条/抖音有稳定搜索流量；3.影视热度榜单上榜；4.档期热门影片。"
-                + "严禁选择冷门新片、无资料新片、AI无法扩写的小众短片/纪录片！禁止优先选择往年老片！"
-                + "第二优先级（仅无合格新片时启用）：若全网无符合条件、有充足素材的本年度近期热片，再从以下经典标签中挑选高分长效经典影片：" + tagList + "。"
+                + "严禁选择冷门新片、无资料新片、虚构影片、AI无法扩写的小众短片/纪录片！禁止优先选择往年老片！"
+                + "第二优先级（仅无合格新片时启用）：若全网无符合条件、有充足素材的本年度近期真实热片，再从以下经典标签中挑选高分长效真实经典影片：" + tagList + "。"
                 + "【去重约束】绝对禁止选择以下已创作过的影片：" + usedKeySet
-                + "【返回规范】严格输出纯JSON，无多余文字、无解释、无markdown，字段必填："
-                + "{\"title\":\"影片名\",\"year\":\"上映年份\",\"tag\":\"影片对应标签\",\"reason\":\"严格按优先级说明选片依据\",\"source\":\"本年度近期热点流量影片/无新片兜底经典长尾影片\"}";
+                + "【返回规范】严格输出纯JSON，无多余文字、无解释、无markdown，字段全部真实可查，必填："
+                + "{\"title\":\"真实影片名\",\"year\":\"真实官方上映年份\",\"tag\":\"影片对应标签\",\"reason\":\"严格按优先级说明真实选片依据\",\"source\":\"本年度近期热点流量影片/无新片兜底经典长尾影片\"}";
 
         // 多次重试+严格判空
         JSONObject aiResult = null;
@@ -197,7 +196,7 @@ public class MovieBlogMain {
             sleepMs(3000);
         }
 
-        // 终极兜底：接口异常时启用经典片兜底
+        // 终极兜底：接口异常时启用经典片兜底（真实影片）
         System.out.println("🔥AI接口重试失败，触发本地终极经典影片兜底机制");
         JSONObject fallbackMovie = new JSONObject();
         fallbackMovie.put("title", "活着");
@@ -208,17 +207,17 @@ public class MovieBlogMain {
         return fallbackMovie;
     }
 
-    // AI选片专用接口调用（增强容错）
+    // AI选片专用接口调用（增强保真容错）
     private static JSONObject callAIPickMovie(String prompt) {
         try {
             JSONObject reqBody = new JSONObject();
             reqBody.put("model", "deepseek-v4-flash");
             reqBody.put("max_tokens", 1024);
-            reqBody.put("temperature", 0.8);
-            reqBody.put("top_p", 0.95);
+            reqBody.put("temperature", 0.7); // 降低随机性，杜绝虚构错误
+            reqBody.put("top_p", 0.9);
 
             JSONArray msgs = new JSONArray();
-            msgs.add(JSONObject.of("role", "system", "content", "你是专业影视流量分析师，严格遵守【新片优先、经典兜底】优先级，只选素材充足可深度扩写的影片，仅返回标准JSON数据，无任何多余内容。"));
+            msgs.add(JSONObject.of("role", "system", "content", "你是专业影视流量分析师，【零幻觉、零虚构、零篡改】，只输出全网可查的真实影片名称、真实上映年份，严格遵守新片优先规则，仅返回标准JSON数据，无任何多余内容。"));
             msgs.add(JSONObject.of("role", "user", "content", prompt));
             reqBody.put("messages", msgs);
 
@@ -246,11 +245,11 @@ public class MovieBlogMain {
         }
     }
 
-    // 【核心修复】多层防空+强制重选片，杜绝空内容卡死任务
+    // 多层防空+强制重选片，杜绝空内容卡死任务
     private static String generateReviewWithRewrite(String title, int year, String source, String tag, String reason) throws IOException {
         for (int round = 1; round <= MAX_REWRITE_TIMES; round++) {
             String content = generateReviewOnce(title, year, source, tag, reason, round);
-            // 严格拦截空内容、空白内容
+            // 严格拦截空内容、空白内容、过短内容
             if (content == null || content.isBlank() || content.length() < 100) {
                 System.out.printf("⚠️第%d轮生成内容为空/过短，重新生成%n", round);
                 sleepMs(3000);
@@ -268,30 +267,31 @@ public class MovieBlogMain {
         throw new IOException("当前影片素材不足，多轮重写失败，需要更换影片");
     }
 
-    // 梯度扩写提示词，强化素材不足适配，杜绝空输出
+    // 梯度扩写提示词，强化真实素材适配，杜绝空输出、虚假内容
     private static String generateReviewOnce(String title, int year, String source, String tag, String reason, int rewriteRound) throws IOException {
         String extraRule = "";
         if (rewriteRound == 1) {
-            extraRule = "完整深度创作，内容饱满详实，稳定输出1400字以上，严禁空白、严禁简短敷衍、严禁内容截断。";
+            extraRule = "完整深度创作，内容饱满详实，稳定输出1400字以上，严禁空白、严禁简短敷衍、严禁内容截断、严禁虚假剧情解读。";
         } else if (rewriteRound == 2) {
-            extraRule = "大幅细化扩写，补充人物细节、剧情隐喻、社会背景、观众共鸣、现实延伸，稳固字数，文风统一，绝对禁止空内容。";
+            extraRule = "大幅细化扩写，补充真实人物细节、官方剧情、真实社会背景、观众共鸣、现实延伸，稳固字数，文风统一，绝对禁止空内容、虚假内容。";
         } else {
-            extraRule = "终极精细化扩容，多角度思辨解读、影片价值剖析、时代背景延伸，严格贴近1400-1800字，只扩不删，杜绝空白输出。";
+            extraRule = "终极精细化扩容，多角度真实思辨解读、影片官方价值剖析、时代背景延伸，严格贴近1400-1800字，只扩不删，杜绝空白、杜绝虚构解读。";
         }
 
         String flowTip = source.contains("热点")
-                ? "本片为本年度近期热门新片，档期流量核心影片，全网讨论度高，适配头条短期爆发流量。"
-                : "本年度无优质可扩写新片，选用高分经典影片，素材充足、适配头条长期搜索长尾流量。";
+                ? "本片为真实本年度近期热门新片，档期流量核心影片，全网真实讨论度高，适配头条短期爆发流量。"
+                : "本年度无优质可扩写真实新片，选用高分真实经典影片，素材充足、适配头条长期搜索长尾流量。";
 
         String sysPrompt = "你是头条小众独立影评博主，固定【温柔细腻、清醒思辨、真诚有温度】的专属个人风格，无模板、无流水线、无烂大街话术。"
-                + "评析影片：" + title + "(" + year + ")｜流量属性：" + source + "｜影片标签：" + tag + "｜选片依据：" + reason + flowTip
-                + "写作硬性规则："
+                + "评析真实影片：" + title + "(" + year + ")｜流量属性：" + source + "｜影片标签：" + tag + "｜选片依据：" + reason + flowTip
+                + "写作硬性保真规则："
                 + "1、纯正文输出，严禁空白、严禁无内容输出，稳定输出1400-1800字符；"
-                + "2、短段落排版，适配手机竖屏阅读，提升完读率；"
-                + "3、极简剧情铺垫，95%内容为个人深度解读、人性剖析、现实共鸣；"
-                + "4、观点小众独特，强化个人IP辨识度；"
-                + "5、只允许扩写细化，禁止清空重写、禁止大幅删减；"
-                + "6、文风真诚克制、有思考、有态度，内容扎实饱满。" + extraRule;
+                + "2、所有剧情、解读、背景必须贴合影片真实内容，严禁虚构、瞎编；"
+                + "3、短段落排版，适配手机竖屏阅读，提升完读率；"
+                + "4、极简剧情铺垫，95%内容为个人深度解读、人性剖析、现实共鸣；"
+                + "5、观点小众独特，强化个人IP辨识度；"
+                + "6、只允许扩写细化，禁止清空重写、禁止大幅删减；"
+                + "7、文风真诚克制、有思考、有态度，内容扎实饱满。" + extraRule;
 
         JSONObject req = new JSONObject();
         req.put("model", "deepseek-v4-flash");
@@ -302,7 +302,7 @@ public class MovieBlogMain {
 
         JSONArray msgs = new JSONArray();
         msgs.add(JSONObject.of("role", "system", "content", sysPrompt));
-        msgs.add(JSONObject.of("role", "user", "content", "输出一篇风格统一、深度饱满、字数达标、无空白、适配头条长效流量的个人专属影评正文。"));
+        msgs.add(JSONObject.of("role", "user", "content", "输出一篇风格统一、深度饱满、字数达标、内容真实、无空白、适配头条长效流量的个人专属影评正文。"));
         req.put("messages", msgs);
 
         int retry = 3;
@@ -399,7 +399,7 @@ public class MovieBlogMain {
 
     // 飞书分片推送
     private static void sendFeishuFullCardArticle(String title, int year, String source, String tag, String reason, String content, int len) throws IOException {
-        String header = String.format("🎬AI严格优先级选片·头条长效影评\n影片：%s（%d）\n流量类型：%s\n影片标签：%s\n选片依据：%s\n文章字数：%d\n——————————\n",
+        String header = String.format("🎬AI严格保真选片·头条长效影评\n影片：%s（%d）\n流量类型：%s\n影片标签：%s\n选片依据：%s\n文章字数：%d\n——————————\n",
                 title, year, source, tag, reason, len);
         sendFeishuChunk(header);
         for (int i = 0; i < content.length(); i += 1200) {
