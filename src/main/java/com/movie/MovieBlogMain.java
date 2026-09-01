@@ -113,11 +113,18 @@ public class MovieBlogMain {
             String source = selectMovie.getString("source");
             String movieTag = selectMovie.getString("tag");
             String selectReason = selectMovie.getString("reason");
-            saveOutput(title, year, source, movieTag, selectReason, articleContent);
+            
+            System.out.println("🔥正在为影片生成3个爆款候选标题...");
+            List<String> titles = generateTitles(title, year, articleContent);
+            for(int i=0; i<titles.size(); i++) {
+                System.out.println("   候选标题 " + (i+1) + ": " + titles.get(i));
+            }
+
+            saveOutput(title, year, source, movieTag, selectReason, articleContent, titles);
             appendToGistHistory(gistData, title, year, source, movieTag, selectReason);
 
             try {
-                sendFeishuSingleCardArticle(title, year, source, movieTag, selectReason, articleContent, articleLen);
+                sendFeishuSingleCardArticle(title, year, source, movieTag, selectReason, articleContent, articleLen, titles);
                 System.out.println("✅全文单卡推送成功！任务正常完成");
             } catch (Exception e) {
                 System.err.println("⚠️飞书单卡推送异常：" + e.getMessage());
@@ -129,6 +136,64 @@ public class MovieBlogMain {
             e.printStackTrace();
             System.exit(1);
         }
+    }
+
+    private static List<String> generateTitles(String movieTitle, int year, String articleContent) {
+        String prompt = "你是头条影视自媒体爆款标题专家。请为电影《" + movieTitle + "》（" + year + "年）的深度影评生成3个极具吸引力、高点击率的头条爆款标题。\n"
+                + "要求：1. 必须包含影片名或核心看点；2. 带有悬念、情绪共鸣、反常识或痛点；3. 字数在18-28字之间；4. 适合头条/百家号调性。\n"
+                + "【返回规范】严格输出纯文本，每行一个标题，共3行，绝对不要序号、不要前缀、不要多余解释！";
+
+        JSONObject reqBody = new JSONObject();
+        reqBody.put("model", "deepseek-v4-flash");
+        reqBody.put("max_tokens", 256);
+        reqBody.put("temperature", 0.8);
+        reqBody.put("top_p", 0.9);
+
+        JSONArray msgs = new JSONArray();
+        msgs.add(JSONObject.of("role", "system", "content", "你是专业自媒体标题专家，只返回3行纯文本标题。"));
+        msgs.add(JSONObject.of("role", "user", "content", prompt));
+        reqBody.put("messages", msgs);
+
+        RequestBody body = RequestBody.create(reqBody.toString(), MediaType.parse("application/json;charset=utf-8"));
+        Request req = new Request.Builder()
+                .url(DEEPSEEK_URL)
+                .header("Authorization", "Bearer " + DEEPSEEK_API_KEY)
+                .post(body)
+                .build();
+
+        List<String> titles = new ArrayList<>();
+        try (Response resp = HTTP_CLIENT.newCall(req).execute()) {
+            if (resp.isSuccessful()) {
+                String resStr = resp.body().string();
+                JSONObject resJson = JSONObject.parseObject(resStr);
+                JSONArray choices = resJson.getJSONArray("choices");
+                if (choices != null && !choices.isEmpty()) {
+                    String content = choices.getJSONObject(0).getJSONObject("message").getString("content");
+                    if (content != null) {
+                        String[] lines = content.trim().split("\n");
+                        for (String line : lines) {
+                            // 清洗掉AI可能自带的 "1. "、"标题1：" 等前缀符号
+                            String clean = line.trim()
+                                    .replaceAll("^[0-9]+[.、)\\]:：]+\\s*", "")
+                                    .replaceAll("^标题[0-9]+[：:]\\s*", "")
+                                    .replaceAll("^[*\\-]\\s*", "");
+                            if (!clean.isEmpty()) {
+                                titles.add(clean);
+                            }
+                            if (titles.size() >= 3) break;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("⚠️生成标题异常：" + e.getMessage());
+        }
+
+        // 兜底机制：如果AI未能成功生成3个标题，则补齐默认标题
+        while (titles.size() < 3) {
+            titles.add("深度解读《" + movieTitle + "》：一部被低估的" + year + "年佳作");
+        }
+        return titles.subList(0, 3);
     }
 
     private static String getCurrentSeason() {
@@ -318,7 +383,7 @@ public class MovieBlogMain {
         return s.trim();
     }
 
-    private static void saveOutput(String title, int year, String source, String tag, String reason, String content) throws IOException {
+    private static void saveOutput(String title, int year, String source, String tag, String reason, String content, List<String> titles) throws IOException {
         Files.write(Paths.get(OUTPUT_DIR, "movie_article.md"), content.getBytes(StandardCharsets.UTF_8));
         JSONObject meta = new JSONObject();
         meta.put("title", title);
@@ -328,6 +393,7 @@ public class MovieBlogMain {
         meta.put("select_reason", reason);
         meta.put("len", content.length());
         meta.put("gen_time", new Date());
+        meta.put("titles", titles); // 保存生成的三个标题
         Files.write(Paths.get(OUTPUT_DIR, "movie_meta.json"), meta.toString().getBytes(StandardCharsets.UTF_8));
     }
 
@@ -383,16 +449,29 @@ public class MovieBlogMain {
         throw new IOException("写入GIST历史库失败");
     }
 
-    private static void sendFeishuSingleCardArticle(String title, int year, String source, String tag, String reason, String content, int len) throws IOException {
+    private static void sendFeishuSingleCardArticle(String title, int year, String source, String tag, String reason, String content, int len, List<String> titles) throws IOException {
         StringBuilder fullText = new StringBuilder();
-        fullText.append(String.format("🎬AI严格保真选片·头条长效影评\n影片：%s（%d）\n流量类型：%s\n影片标签：%s\n选片依据：%s\n文章字数：%d\n——————————\n\n",
+        fullText.append(String.format("🎬**AI严格保真选片·头条长效影评**\n**影片**：%s（%d）\n**流量类型**：%s\n**影片标签**：%s\n**选片依据**：%s\n**文章字数**：%d\n\n",
                 title, year, source, tag, reason, len));
+        
+        // 插入三个候选标题
+        fullText.append("**🔥 爆款标题推荐（请任选其一使用）：**\n");
+        for (int i = 0; i < titles.size(); i++) {
+            fullText.append(String.format("%d. %s\n", i + 1, titles.get(i)));
+        }
+        fullText.append("——————————\n\n");
         fullText.append(content);
 
         JSONObject payload = new JSONObject();
         payload.put("msg_type", "interactive");
         JSONObject card = new JSONObject();
         card.put("wide_screen_mode", true);
+        // 增加卡片 Header 主题，提升视觉体验
+        card.put("header", JSONObject.of(
+                "title", JSONObject.of("tag", "plain_text", "content", "🎬 每日影评推送：" + title),
+                "template", "blue"
+        ));
+        
         JSONArray elements = new JSONArray();
         elements.add(JSONObject.of(
                 "tag", "div",
