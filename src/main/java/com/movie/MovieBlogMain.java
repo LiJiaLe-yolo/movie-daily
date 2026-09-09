@@ -40,6 +40,7 @@ public class MovieBlogMain {
             "青春爱情经典", "逆袭励志经典", "年代传世佳作", "小众文艺热片"
     };
 
+    // 🎯 扩充备用片库：从 8 部增加到 18 部，大幅延缓备用池耗尽的时间
     private static final List<Map<String, Object>> CLASSIC_MOVIE_POOL;
 
     static {
@@ -52,6 +53,18 @@ public class MovieBlogMain {
         CLASSIC_MOVIE_POOL.add(Map.of("title", "你好，李焕英", "year", 2021, "tag", "家庭治愈经典、温情现实佳作", "reason", "国民级温情影片，受众广泛，讨论度持久"));
         CLASSIC_MOVIE_POOL.add(Map.of("title", "千与千寻", "year", 2001, "tag", "治愈文艺经典、成长寓言佳作", "reason", "日系传世动画，常年有搜索流量，解读维度丰富"));
         CLASSIC_MOVIE_POOL.add(Map.of("title", "寻梦环游记", "year", 2017, "tag", "亲情治愈经典、奇幻温情佳作", "reason", "亲情治愈顶流动画，大众好感度高，适配自媒体流量"));
+        
+        // 🎯 新增 10 部高质量备用电影
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "让子弹飞", "year", 2010, "tag", "黑色幽默经典、现实隐喻佳作", "reason", "国产神作，常看常新，解读空间极大，自带长尾流量"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "楚门的世界", "year", 1998, "tag", "哲学思辨经典、人性觉醒佳作", "reason", "极具前瞻性的神作，契合当下社会情绪，极易引发共鸣"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "星际穿越", "year", 2014, "tag", "科幻温情经典、宇宙浪漫佳作", "reason", "硬核科幻与极致亲情的结合，受众极广，视觉与情感双重震撼"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "我不是药神", "year", 2018, "tag", "现实催泪经典、社会良知佳作", "reason", "国产现实题材里程碑，社会痛点精准，自带极高讨论度"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "泰坦尼克号", "year", 1997, "tag", "爱情史诗经典、灾难视听佳作", "reason", "全球影史票房奇迹，跨越时代的爱情绝唱，流量永不过时"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "盗梦空间", "year", 2010, "tag", "悬疑烧脑经典、科幻叙事神作", "reason", "诺兰代表作，逻辑严密，细节丰富，极易产出深度解析爆款"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "辛德勒的名单", "year", 1993, "tag", "人性光辉经典、战争反思佳作", "reason", "影史不朽丰碑，沉重而深刻，适合做有深度的情感共鸣文"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "美丽人生", "year", 1997, "tag", "温情治愈经典、父爱如山佳作", "reason", "笑中带泪的极致体验，极度契合治愈系账号调性"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "大话西游之大圣娶亲", "year", 1995, "tag", "解构主义经典、后现代爱情佳作", "reason", "华语 cult 神作，金句频出，年轻受众极多，二创空间大"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "当幸福来敲门", "year", 2006, "tag", "逆袭励志经典、父子温情佳作", "reason", "全球公认的励志教科书，低谷期受众极爱看，情绪价值拉满"));
     }
 
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient.Builder()
@@ -255,7 +268,8 @@ public class MovieBlogMain {
                 + "【返回规范】严格输出纯JSON，无多余文字，必填：{\"title\":\"\",\"year\":\"\",\"tag\":\"\",\"reason\":\"\",\"source\":\"\"}";
 
         JSONObject aiResult = null;
-        for (int i = 0; i < 3; i++) {
+        // 🎯 核心修复1：将 AI 重试次数从 3 次增加到 5 次，给 AI 更多机会找新片
+        for (int i = 0; i < 5; i++) { 
             aiResult = callAIPickMovie(aiPickPrompt);
             if (aiResult != null && !isBlank(aiResult.getString("title"))) {
                 String checkKey = buildMovieKey(aiResult.getString("title"), aiResult.get("year"));
@@ -278,7 +292,7 @@ public class MovieBlogMain {
             sleepMs(3000);
         }
 
-        System.out.println("🔥AI接口重试失败，触发本地经典影片轮询兜底机制");
+        System.out.println("🔥AI接口重试5次均失败，触发本地经典影片轮询兜底机制");
         List<Map<String, Object>> availableClassic = new ArrayList<>();
         for (Map<String, Object> movie : CLASSIC_MOVIE_POOL) {
             String key = buildMovieKey(movie.get("title").toString(), movie.get("year"));
@@ -287,8 +301,35 @@ public class MovieBlogMain {
             }
         }
 
+        // 🎯 核心修复2：彻底删除了强行重置逻辑！如果备用池空了，绝不强行重写老片
         if (availableClassic.isEmpty()) {
-            availableClassic = new ArrayList<>(CLASSIC_MOVIE_POOL);
+            System.err.println("❌严重警告：本地经典备用片库（18部）已全部创作完毕，且AI连续5次未能选出新片！");
+            System.err.println("💡建议：请扩充 CLASSIC_MOVIE_POOL 或检查 AI 接口状态。强制AI进行额外10次重试...");
+            
+            // 备用池耗尽时，让 AI 死磕，直到找到一部没写过的电影
+            for (int i = 0; i < 10; i++) {
+                System.out.printf("🔄 备用池耗尽，强制AI进行第 %d 次额外重试...%n", i + 1);
+                aiResult = callAIPickMovie(aiPickPrompt);
+                if (aiResult != null && !isBlank(aiResult.getString("title"))) {
+                    String checkKey = buildMovieKey(aiResult.getString("title"), aiResult.get("year"));
+                    if (!usedKeySet.contains(checkKey)) {
+                        aiResult.put("title", aiResult.getString("title").trim().replaceAll("^[《]|[》]$", ""));
+                        int cleanYear = 0;
+                        Object y = aiResult.get("year");
+                        if (y instanceof Number) cleanYear = ((Number) y).intValue();
+                        else if (y != null) {
+                            String ys = y.toString().replaceAll("[^0-9]", "");
+                            if (!ys.isEmpty()) {
+                                try { cleanYear = Integer.parseInt(ys); } catch (Exception ignored) {}
+                            }
+                        }
+                        aiResult.put("year", cleanYear);
+                        return aiResult;
+                    }
+                }
+                sleepMs(3000);
+            }
+            throw new IOException("AI选片彻底失败，且本地备用片库已耗尽，任务终止以防重复。");
         }
 
         Random random = new Random();
