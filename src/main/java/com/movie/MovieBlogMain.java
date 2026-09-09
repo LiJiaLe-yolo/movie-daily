@@ -40,17 +40,18 @@ public class MovieBlogMain {
             "青春爱情经典", "逆袭励志经典", "年代传世佳作", "小众文艺热片"
     };
 
-    private static final List<Map<String,Object>> CLASSIC_MOVIE_POOL;
+    private static final List<Map<String, Object>> CLASSIC_MOVIE_POOL;
+
     static {
         CLASSIC_MOVIE_POOL = new ArrayList<>();
-        CLASSIC_MOVIE_POOL.add(Map.of("title","活着","year",1994,"tag","人性传世经典、现实高分经典","reason","国产顶级现实经典，素材充足，适配长效流量"));
-        CLASSIC_MOVIE_POOL.add(Map.of("title","霸王别姬","year",1993,"tag","影史封神经典、时代叙事经典","reason","华语影史天花板，解读角度极多，流量稳定"));
-        CLASSIC_MOVIE_POOL.add(Map.of("title","阿甘正传","year",1994,"tag","励志传世经典、人生治愈经典","reason","全球高分常青佳作，受众极广，长尾流量充足"));
-        CLASSIC_MOVIE_POOL.add(Map.of("title","肖申克的救赎","year",1994,"tag","人性博弈经典、逆袭励志经典","reason","影史高分榜首，常年热搜，可深度解读维度丰富"));
-        CLASSIC_MOVIE_POOL.add(Map.of("title","山海情","year",2021,"tag","现实纪实经典、家国温情佳作","reason","国产高分现实题材，口碑过硬，适配大众共鸣流量"));
-        CLASSIC_MOVIE_POOL.add(Map.of("title","你好，李焕英","year",2021,"tag","家庭治愈经典、温情现实佳作","reason","国民级温情影片，受众广泛，讨论度持久"));
-        CLASSIC_MOVIE_POOL.add(Map.of("title","千与千寻","year",2001,"tag","治愈文艺经典、成长寓言佳作","reason","日系传世动画，常年有搜索流量，解读维度丰富"));
-        CLASSIC_MOVIE_POOL.add(Map.of("title","寻梦环游记","year",2017,"tag","亲情治愈经典、奇幻温情佳作","reason","亲情治愈顶流动画，大众好感度高，适配自媒体流量"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "活着", "year", 1994, "tag", "人性传世经典、现实高分经典", "reason", "国产顶级现实经典，素材充足，适配长效流量"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "霸王别姬", "year", 1993, "tag", "影史封神经典、时代叙事经典", "reason", "华语影史天花板，解读角度极多，流量稳定"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "阿甘正传", "year", 1994, "tag", "励志传世经典、人生治愈经典", "reason", "全球高分常青佳作，受众极广，长尾流量充足"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "肖申克的救赎", "year", 1994, "tag", "人性博弈经典、逆袭励志经典", "reason", "影史高分榜首，常年热搜，可深度解读维度丰富"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "山海情", "year", 2021, "tag", "现实纪实经典、家国温情佳作", "reason", "国产高分现实题材，口碑过硬，适配大众共鸣流量"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "你好，李焕英", "year", 2021, "tag", "家庭治愈经典、温情现实佳作", "reason", "国民级温情影片，受众广泛，讨论度持久"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "千与千寻", "year", 2001, "tag", "治愈文艺经典、成长寓言佳作", "reason", "日系传世动画，常年有搜索流量，解读维度丰富"));
+        CLASSIC_MOVIE_POOL.add(Map.of("title", "寻梦环游记", "year", 2017, "tag", "亲情治愈经典、奇幻温情佳作", "reason", "亲情治愈顶流动画，大众好感度高，适配自媒体流量"));
     }
 
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient.Builder()
@@ -113,11 +114,11 @@ public class MovieBlogMain {
             String source = selectMovie.getString("source");
             String movieTag = selectMovie.getString("tag");
             String selectReason = selectMovie.getString("reason");
-            
+
             System.out.println("🔥正在为影片生成3个爆款候选标题...");
             List<String> titles = generateTitles(title, year, articleContent);
-            for(int i=0; i<titles.size(); i++) {
-                System.out.println("   候选标题 " + (i+1) + ": " + titles.get(i));
+            for (int i = 0; i < titles.size(); i++) {
+                System.out.println("   候选标题 " + (i + 1) + ": " + titles.get(i));
             }
 
             saveOutput(title, year, source, movieTag, selectReason, articleContent, titles);
@@ -172,7 +173,6 @@ public class MovieBlogMain {
                     if (content != null) {
                         String[] lines = content.trim().split("\n");
                         for (String line : lines) {
-                            // 清洗掉AI可能自带的 "1. "、"标题1：" 等前缀符号
                             String clean = line.trim()
                                     .replaceAll("^[0-9]+[.、)\\]:：]+\\s*", "")
                                     .replaceAll("^标题[0-9]+[：:]\\s*", "")
@@ -189,7 +189,6 @@ public class MovieBlogMain {
             System.err.println("⚠️生成标题异常：" + e.getMessage());
         }
 
-        // 兜底机制：如果AI未能成功生成3个标题，则补齐默认标题
         while (titles.size() < 3) {
             titles.add("深度解读《" + movieTitle + "》：一部被低估的" + year + "年佳作");
         }
@@ -224,11 +223,26 @@ public class MovieBlogMain {
         Files.createDirectories(Paths.get(OUTPUT_DIR));
     }
 
+    private static String buildMovieKey(String title, Object yearObj) {
+        if (title == null) return "unknown|0";
+        String cleanTitle = title.trim().replaceAll("^[《]|[》]$", "").replaceAll("\\s+", "");
+        int year = 0;
+        if (yearObj instanceof Number) {
+            year = ((Number) yearObj).intValue();
+        } else if (yearObj != null) {
+            String yearStr = yearObj.toString().replaceAll("[^0-9]", "");
+            if (!yearStr.isEmpty()) {
+                try { year = Integer.parseInt(yearStr); } catch (Exception ignored) {}
+            }
+        }
+        return cleanTitle + "|" + year;
+    }
+
     private static JSONObject autoPickMovieByAI(JSONArray usedMovies, String season, String fileStage, int currentYear) throws IOException {
         Set<String> usedKeySet = new HashSet<>();
         for (Object o : usedMovies) {
             JSONObject jo = (JSONObject) o;
-            usedKeySet.add(jo.getString("title") + "|" + jo.getIntValue("year"));
+            usedKeySet.add(buildMovieKey(jo.getString("title"), jo.get("year")));
         }
 
         String aiPickPrompt = "你是头条影视自媒体流量选片专家，当前年份：" + currentYear + "，当前时间：" + season + "，当前影视档期：" + fileStage + "。"
@@ -243,20 +257,31 @@ public class MovieBlogMain {
         JSONObject aiResult = null;
         for (int i = 0; i < 3; i++) {
             aiResult = callAIPickMovie(aiPickPrompt);
-            if (aiResult != null && !isBlank(aiResult.getString("title")) && aiResult.getIntValue("year") > 0) {
-                String checkKey = aiResult.getString("title") + "|" + aiResult.getIntValue("year");
+            if (aiResult != null && !isBlank(aiResult.getString("title"))) {
+                String checkKey = buildMovieKey(aiResult.getString("title"), aiResult.get("year"));
                 if (!usedKeySet.contains(checkKey)) {
+                    aiResult.put("title", aiResult.getString("title").trim().replaceAll("^[《]|[》]$", ""));
+                    int cleanYear = 0;
+                    Object y = aiResult.get("year");
+                    if (y instanceof Number) cleanYear = ((Number) y).intValue();
+                    else if (y != null) {
+                        String ys = y.toString().replaceAll("[^0-9]", "");
+                        if (!ys.isEmpty()) {
+                            try { cleanYear = Integer.parseInt(ys); } catch (Exception ignored) {}
+                        }
+                    }
+                    aiResult.put("year", cleanYear);
                     return aiResult;
                 }
-                System.out.printf("⚠️第%d轮AI选片命中历史影片，跳过重试...%n", i + 1);
+                System.out.printf("⚠️第%d轮AI选片命中历史影片（%s），跳过重试...%n", i + 1, checkKey);
             }
             sleepMs(3000);
         }
 
         System.out.println("🔥AI接口重试失败，触发本地经典影片轮询兜底机制");
-        List<Map<String,Object>> availableClassic = new ArrayList<>();
-        for (Map<String,Object> movie : CLASSIC_MOVIE_POOL) {
-            String key = movie.get("title") + "|" + movie.get("year");
+        List<Map<String, Object>> availableClassic = new ArrayList<>();
+        for (Map<String, Object> movie : CLASSIC_MOVIE_POOL) {
+            String key = buildMovieKey(movie.get("title").toString(), movie.get("year"));
             if (!usedKeySet.contains(key)) {
                 availableClassic.add(movie);
             }
@@ -267,10 +292,10 @@ public class MovieBlogMain {
         }
 
         Random random = new Random();
-        Map<String,Object> randomMovie = availableClassic.get(random.nextInt(availableClassic.size()));
+        Map<String, Object> randomMovie = availableClassic.get(random.nextInt(availableClassic.size()));
 
         JSONObject fallbackMovie = new JSONObject();
-        fallbackMovie.put("title", randomMovie.get("title"));
+        fallbackMovie.put("title", randomMovie.get("title").toString().trim().replaceAll("^[《]|[》]$", ""));
         fallbackMovie.put("year", randomMovie.get("year"));
         fallbackMovie.put("tag", randomMovie.get("tag"));
         fallbackMovie.put("reason", randomMovie.get("reason") + "，AI新片选片异常，启用轮询兜底机制");
@@ -305,11 +330,20 @@ public class MovieBlogMain {
                 JSONArray choices = resJson.getJSONArray("choices");
                 if (choices == null || choices.isEmpty()) return null;
                 String content = choices.getJSONObject(0).getJSONObject("message").getString("content");
-                content = content.replaceAll("^```json|^```|```$", "").trim();
+                
+                int start = content.indexOf('{');
+                int end = content.lastIndexOf('}');
+                if (start != -1 && end != -1 && end > start) {
+                    content = content.substring(start, end + 1);
+                } else {
+                    content = content.replaceAll("^```json|^```|```$", "").trim();
+                }
+                
                 if (isBlank(content)) return null;
                 return JSONObject.parseObject(content);
             }
         } catch (Exception e) {
+            System.err.println("⚠️AI选片JSON解析异常：" + e.getMessage());
             return null;
         }
     }
@@ -392,8 +426,8 @@ public class MovieBlogMain {
         meta.put("movie_tag", tag);
         meta.put("select_reason", reason);
         meta.put("len", content.length());
-        meta.put("gen_time", new Date());
-        meta.put("titles", titles); // 保存生成的三个标题
+        meta.put("gen_time", System.currentTimeMillis());
+        meta.put("titles", titles);
         Files.write(Paths.get(OUTPUT_DIR, "movie_meta.json"), meta.toString().getBytes(StandardCharsets.UTF_8));
     }
 
@@ -402,8 +436,10 @@ public class MovieBlogMain {
         for (int r = 0; r < retry; r++) {
             try {
                 Request req = new Request.Builder()
-                        .url("https://api.github.com/gists/" + GIST_ID)
-                        .header("Authorization", "token " + GH_PAT).get().build();
+                        .url("https://api.github.com/gists/" + GIST_ID + "?t=" + System.currentTimeMillis())
+                        .header("Authorization", "token " + GH_PAT)
+                        .header("Cache-Control", "no-cache")
+                        .get().build();
                 Response resp = HTTP_CLIENT.newCall(req).execute();
                 JSONObject gist = JSONObject.parseObject(resp.body().string());
                 return JSONObject.parseObject(gist.getJSONObject("files").getJSONObject(GIST_FILENAME).getString("content"));
@@ -422,7 +458,7 @@ public class MovieBlogMain {
         item.put("source", source);
         item.put("tag", tag);
         item.put("reason", reason);
-        item.put("gen_time", new Date());
+        item.put("gen_time", System.currentTimeMillis());
         used.add(item);
         while (used.size() > MAX_HISTORY_SIZE) used.remove(0);
 
@@ -453,8 +489,7 @@ public class MovieBlogMain {
         StringBuilder fullText = new StringBuilder();
         fullText.append(String.format("🎬**AI严格保真选片·头条长效影评**\n**影片**：%s（%d）\n**流量类型**：%s\n**影片标签**：%s\n**选片依据**：%s\n**文章字数**：%d\n\n",
                 title, year, source, tag, reason, len));
-        
-        // 插入三个候选标题
+
         fullText.append("**🔥 爆款标题推荐（请任选其一使用）：**\n");
         for (int i = 0; i < titles.size(); i++) {
             fullText.append(String.format("%d. %s\n", i + 1, titles.get(i)));
@@ -466,12 +501,11 @@ public class MovieBlogMain {
         payload.put("msg_type", "interactive");
         JSONObject card = new JSONObject();
         card.put("wide_screen_mode", true);
-        // 增加卡片 Header 主题，提升视觉体验
         card.put("header", JSONObject.of(
                 "title", JSONObject.of("tag", "plain_text", "content", "🎬 每日影评推送：" + title),
                 "template", "blue"
         ));
-        
+
         JSONArray elements = new JSONArray();
         elements.add(JSONObject.of(
                 "tag", "div",
@@ -489,6 +523,9 @@ public class MovieBlogMain {
     }
 
     private static void sleepMs(long ms) {
-        try { TimeUnit.MILLISECONDS.sleep(ms); } catch (Exception ignored) {}
+        try {
+            TimeUnit.MILLISECONDS.sleep(ms);
+        } catch (Exception ignored) {
+        }
     }
 }
