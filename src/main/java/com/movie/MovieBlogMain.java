@@ -40,7 +40,6 @@ public class MovieBlogMain {
             "青春爱情经典", "逆袭励志经典", "年代传世佳作", "小众文艺热片"
     };
 
-    // 🎯 扩充备用片库：从 8 部增加到 18 部，大幅延缓备用池耗尽的时间
     private static final List<Map<String, Object>> CLASSIC_MOVIE_POOL;
 
     static {
@@ -54,7 +53,6 @@ public class MovieBlogMain {
         CLASSIC_MOVIE_POOL.add(Map.of("title", "千与千寻", "year", 2001, "tag", "治愈文艺经典、成长寓言佳作", "reason", "日系传世动画，常年有搜索流量，解读维度丰富"));
         CLASSIC_MOVIE_POOL.add(Map.of("title", "寻梦环游记", "year", 2017, "tag", "亲情治愈经典、奇幻温情佳作", "reason", "亲情治愈顶流动画，大众好感度高，适配自媒体流量"));
         
-        // 🎯 新增 10 部高质量备用电影
         CLASSIC_MOVIE_POOL.add(Map.of("title", "让子弹飞", "year", 2010, "tag", "黑色幽默经典、现实隐喻佳作", "reason", "国产神作，常看常新，解读空间极大，自带长尾流量"));
         CLASSIC_MOVIE_POOL.add(Map.of("title", "楚门的世界", "year", 1998, "tag", "哲学思辨经典、人性觉醒佳作", "reason", "极具前瞻性的神作，契合当下社会情绪，极易引发共鸣"));
         CLASSIC_MOVIE_POOL.add(Map.of("title", "星际穿越", "year", 2014, "tag", "科幻温情经典、宇宙浪漫佳作", "reason", "硬核科幻与极致亲情的结合，受众极广，视觉与情感双重震撼"));
@@ -106,7 +104,7 @@ public class MovieBlogMain {
                     articleContent = generateReviewWithRewrite(title, year, source, movieTag, selectReason);
                     break;
                 } catch (Exception e) {
-                    System.out.printf("⚠️当前影片生成失败，触发第%d次重选片机制%n", reSelect + 1);
+                    System.out.printf("⚠️当前影片生成失败，触发第%d次重选片机制 | 错误信息: %s%n", reSelect + 1, e.getMessage());
                     sleepMs(2000);
                 }
             }
@@ -197,6 +195,8 @@ public class MovieBlogMain {
                         }
                     }
                 }
+            } else {
+                System.err.println("⚠️ 标题生成API请求失败 | HTTP状态码: " + resp.code());
             }
         } catch (Exception e) {
             System.err.println("⚠️生成标题异常：" + e.getMessage());
@@ -268,26 +268,42 @@ public class MovieBlogMain {
                 + "【返回规范】严格输出纯JSON，无多余文字，必填：{\"title\":\"\",\"year\":\"\",\"tag\":\"\",\"reason\":\"\",\"source\":\"\"}";
 
         JSONObject aiResult = null;
-        // 🎯 核心修复1：将 AI 重试次数从 3 次增加到 5 次，给 AI 更多机会找新片
-        for (int i = 0; i < 5; i++) { 
+        
+        // 🎯 核心修复：将 AI 重试次数从 3 次增加到 5 次，并增加详细日志
+        for (int i = 0; i < 5; i++) {
+            System.out.printf("🔄 正在执行第 %d/5 轮AI选片...%n", i + 1);
             aiResult = callAIPickMovie(aiPickPrompt);
-            if (aiResult != null && !isBlank(aiResult.getString("title"))) {
-                String checkKey = buildMovieKey(aiResult.getString("title"), aiResult.get("year"));
-                if (!usedKeySet.contains(checkKey)) {
-                    aiResult.put("title", aiResult.getString("title").trim().replaceAll("^[《]|[》]$", ""));
-                    int cleanYear = 0;
-                    Object y = aiResult.get("year");
-                    if (y instanceof Number) cleanYear = ((Number) y).intValue();
-                    else if (y != null) {
-                        String ys = y.toString().replaceAll("[^0-9]", "");
-                        if (!ys.isEmpty()) {
-                            try { cleanYear = Integer.parseInt(ys); } catch (Exception ignored) {}
-                        }
-                    }
-                    aiResult.put("year", cleanYear);
-                    return aiResult;
-                }
-                System.out.printf("⚠️第%d轮AI选片命中历史影片（%s），跳过重试...%n", i + 1, checkKey);
+            
+            if (aiResult == null) {
+                System.err.println("⚠️ 第" + (i + 1) + "轮AI选片返回结果为null，等待3秒后重试...");
+                sleepMs(3000);
+                continue;
+            }
+            
+            String title = aiResult.getString("title");
+            Object yearObj = aiResult.get("year");
+            
+            if (isBlank(title)) {
+                System.err.println("⚠️ 第" + (i + 1) + "轮AI选片返回的title为空 | AI返回完整数据: " + aiResult.toJSONString());
+                sleepMs(3000);
+                continue;
+            }
+            
+            int year = parseYear(yearObj);
+            if (year <= 0) {
+                System.err.println("⚠️ 第" + (i + 1) + "轮AI选片返回的year无效: " + yearObj + " | AI返回完整数据: " + aiResult.toJSONString());
+                sleepMs(3000);
+                continue;
+            }
+            
+            String checkKey = buildMovieKey(title, year);
+            if (!usedKeySet.contains(checkKey)) {
+                System.out.printf("✅ 第%d轮AI选片成功，找到新片: %s (%d)%n", i + 1, title, year);
+                aiResult.put("title", title.trim().replaceAll("^[《]|[》]$", ""));
+                aiResult.put("year", year);
+                return aiResult;
+            } else {
+                System.out.printf("⚠️ 第%d轮AI选片命中历史影片（%s），跳过重试...%n", i + 1, checkKey);
             }
             sleepMs(3000);
         }
@@ -301,31 +317,44 @@ public class MovieBlogMain {
             }
         }
 
-        // 🎯 核心修复2：彻底删除了强行重置逻辑！如果备用池空了，绝不强行重写老片
         if (availableClassic.isEmpty()) {
             System.err.println("❌严重警告：本地经典备用片库（18部）已全部创作完毕，且AI连续5次未能选出新片！");
             System.err.println("💡建议：请扩充 CLASSIC_MOVIE_POOL 或检查 AI 接口状态。强制AI进行额外10次重试...");
             
-            // 备用池耗尽时，让 AI 死磕，直到找到一部没写过的电影
             for (int i = 0; i < 10; i++) {
-                System.out.printf("🔄 备用池耗尽，强制AI进行第 %d 次额外重试...%n", i + 1);
+                System.out.printf("🔄 备用池耗尽，强制AI进行第 %d/10 次额外重试...%n", i + 1);
                 aiResult = callAIPickMovie(aiPickPrompt);
-                if (aiResult != null && !isBlank(aiResult.getString("title"))) {
-                    String checkKey = buildMovieKey(aiResult.getString("title"), aiResult.get("year"));
-                    if (!usedKeySet.contains(checkKey)) {
-                        aiResult.put("title", aiResult.getString("title").trim().replaceAll("^[《]|[》]$", ""));
-                        int cleanYear = 0;
-                        Object y = aiResult.get("year");
-                        if (y instanceof Number) cleanYear = ((Number) y).intValue();
-                        else if (y != null) {
-                            String ys = y.toString().replaceAll("[^0-9]", "");
-                            if (!ys.isEmpty()) {
-                                try { cleanYear = Integer.parseInt(ys); } catch (Exception ignored) {}
-                            }
-                        }
-                        aiResult.put("year", cleanYear);
-                        return aiResult;
-                    }
+                
+                if (aiResult == null) {
+                    System.err.println("⚠️ 额外重试第" + (i + 1) + "轮返回结果为null...");
+                    sleepMs(3000);
+                    continue;
+                }
+                
+                String title = aiResult.getString("title");
+                Object yearObj = aiResult.get("year");
+                
+                if (isBlank(title)) {
+                    System.err.println("⚠️ 额外重试第" + (i + 1) + "轮返回的title为空 | AI返回完整数据: " + aiResult.toJSONString());
+                    sleepMs(3000);
+                    continue;
+                }
+                
+                int year = parseYear(yearObj);
+                if (year <= 0) {
+                    System.err.println("⚠️ 额外重试第" + (i + 1) + "轮返回的year无效: " + yearObj + " | AI返回完整数据: " + aiResult.toJSONString());
+                    sleepMs(3000);
+                    continue;
+                }
+                
+                String checkKey = buildMovieKey(title, year);
+                if (!usedKeySet.contains(checkKey)) {
+                    System.out.printf("✅ 额外重试第%d轮成功，找到新片: %s (%d)%n", i + 1, title, year);
+                    aiResult.put("title", title.trim().replaceAll("^[《]|[》]$", ""));
+                    aiResult.put("year", year);
+                    return aiResult;
+                } else {
+                    System.out.printf("⚠️ 额外重试第%d轮命中历史影片（%s），继续尝试...%n", i + 1, checkKey);
                 }
                 sleepMs(3000);
             }
@@ -342,6 +371,18 @@ public class MovieBlogMain {
         fallbackMovie.put("reason", randomMovie.get("reason") + "，AI新片选片异常，启用轮询兜底机制");
         fallbackMovie.put("source", "无新片兜底经典长尾影片");
         return fallbackMovie;
+    }
+
+    private static int parseYear(Object yearObj) {
+        if (yearObj instanceof Number) {
+            return ((Number) yearObj).intValue();
+        } else if (yearObj != null) {
+            String yearStr = yearObj.toString().replaceAll("[^0-9]", "");
+            if (!yearStr.isEmpty()) {
+                try { return Integer.parseInt(yearStr); } catch (Exception ignored) {}
+            }
+        }
+        return 0;
     }
 
     private static JSONObject callAIPickMovie(String prompt) {
@@ -363,14 +404,34 @@ public class MovieBlogMain {
                     .header("Authorization", "Bearer " + DEEPSEEK_API_KEY)
                     .post(body)
                     .build();
+            
             try (Response resp = HTTP_CLIENT.newCall(req).execute()) {
-                if (!resp.isSuccessful()) return null;
+                if (!resp.isSuccessful()) {
+                    String errBody = resp.body() != null ? resp.body().string() : "无响应体";
+                    System.err.println("❌ AI选片API请求失败 | HTTP状态码: " + resp.code() + " | 错误信息: " + errBody);
+                    return null;
+                }
+                
                 String resStr = resp.body().string();
-                if (isBlank(resStr)) return null;
+                if (isBlank(resStr)) {
+                    System.err.println("❌ AI选片API返回内容为空");
+                    return null;
+                }
+                
                 JSONObject resJson = JSONObject.parseObject(resStr);
                 JSONArray choices = resJson.getJSONArray("choices");
-                if (choices == null || choices.isEmpty()) return null;
+                if (choices == null || choices.isEmpty()) {
+                    System.err.println("❌ AI选片API返回无choices字段 | 原始响应: " + resStr);
+                    return null;
+                }
+                
                 String content = choices.getJSONObject(0).getJSONObject("message").getString("content");
+                if (isBlank(content)) {
+                    System.err.println("❌ AI选片API返回content为空 | 原始响应: " + resStr);
+                    return null;
+                }
+                
+                System.out.println("🤖 AI选片原始返回: " + content);
                 
                 int start = content.indexOf('{');
                 int end = content.lastIndexOf('}');
@@ -380,11 +441,21 @@ public class MovieBlogMain {
                     content = content.replaceAll("^```json|^```|```$", "").trim();
                 }
                 
-                if (isBlank(content)) return null;
-                return JSONObject.parseObject(content);
+                if (isBlank(content)) {
+                    System.err.println("❌ AI选片内容清洗后为空 | 原始内容: " + choices.getJSONObject(0).getJSONObject("message").getString("content"));
+                    return null;
+                }
+                
+                try {
+                    return JSONObject.parseObject(content);
+                } catch (Exception parseEx) {
+                    System.err.println("❌ AI选片JSON解析失败 | 清洗后内容: " + content + " | 异常: " + parseEx.getMessage());
+                    return null;
+                }
             }
         } catch (Exception e) {
-            System.err.println("⚠️AI选片JSON解析异常：" + e.getMessage());
+            System.err.println("❌ AI选片发生未知异常: " + e.getMessage());
+            e.printStackTrace();
             return null;
         }
     }
@@ -446,6 +517,7 @@ public class MovieBlogMain {
                         .getJSONObject("message").getString("content");
                 return cleanAiContent(raw);
             } catch (Exception e) {
+                System.err.println("⚠️ 影评生成第" + (i + 1) + "次重试异常: " + e.getMessage());
                 sleepMs(2000);
             }
         }
@@ -485,6 +557,7 @@ public class MovieBlogMain {
                 JSONObject gist = JSONObject.parseObject(resp.body().string());
                 return JSONObject.parseObject(gist.getJSONObject("files").getJSONObject(GIST_FILENAME).getString("content"));
             } catch (Exception e) {
+                System.err.println("⚠️ Gist读取第" + (r + 1) + "次异常: " + e.getMessage());
                 sleepMs(1000);
             }
         }
@@ -520,6 +593,7 @@ public class MovieBlogMain {
                         .method("PATCH", rb).build();
                 if (HTTP_CLIENT.newCall(req).execute().isSuccessful()) return;
             } catch (Exception e) {
+                System.err.println("⚠️ Gist写入第" + (r + 1) + "次异常: " + e.getMessage());
                 sleepMs(1000);
             }
         }
