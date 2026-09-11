@@ -24,7 +24,7 @@ public class MovieBlogMain {
     private static final String FEISHU_WEBHOOK_MOVIE = System.getenv("FEISHU_WEBHOOK_MOVIE");
     private static final String DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
-    private static final int MAX_OUTPUT_TOKENS = 4000;
+    private static final int MAX_OUTPUT_TOKENS = 8192; // 拉大写文章的Token上限
     private static final int ARTICLE_MIN_LEN = 1400;
     private static final int ARTICLE_MAX_LEN = 1800;
     private static final int MAX_REWRITE_TIMES = 3;
@@ -32,13 +32,6 @@ public class MovieBlogMain {
     private static final int MAX_HISTORY_SIZE = 500;
     private static final String GIST_FILENAME = "movie_history.json";
     private static final String OUTPUT_DIR = "output";
-
-    private static final String[] CLASSIC_TAGS = {
-            "现实高分经典", "人性传世经典", "家庭治愈经典", "小众高分佳作",
-            "情感深度经典", "文艺叙事经典", "国产优质佳作", "纪实温情经典",
-            "现实深度佳作", "奥斯卡获奖经典", "人性博弈经典", "治愈系高分经典",
-            "青春爱情经典", "逆袭励志经典", "年代传世佳作", "小众文艺热片"
-    };
 
     private static final List<Map<String, Object>> CLASSIC_MOVIE_POOL;
 
@@ -52,7 +45,6 @@ public class MovieBlogMain {
         CLASSIC_MOVIE_POOL.add(Map.of("title", "你好，李焕英", "year", 2021, "tag", "家庭治愈经典、温情现实佳作", "reason", "国民级温情影片，受众广泛，讨论度持久"));
         CLASSIC_MOVIE_POOL.add(Map.of("title", "千与千寻", "year", 2001, "tag", "治愈文艺经典、成长寓言佳作", "reason", "日系传世动画，常年有搜索流量，解读维度丰富"));
         CLASSIC_MOVIE_POOL.add(Map.of("title", "寻梦环游记", "year", 2017, "tag", "亲情治愈经典、奇幻温情佳作", "reason", "亲情治愈顶流动画，大众好感度高，适配自媒体流量"));
-        
         CLASSIC_MOVIE_POOL.add(Map.of("title", "让子弹飞", "year", 2010, "tag", "黑色幽默经典、现实隐喻佳作", "reason", "国产神作，常看常新，解读空间极大，自带长尾流量"));
         CLASSIC_MOVIE_POOL.add(Map.of("title", "楚门的世界", "year", 1998, "tag", "哲学思辨经典、人性觉醒佳作", "reason", "极具前瞻性的神作，契合当下社会情绪，极易引发共鸣"));
         CLASSIC_MOVIE_POOL.add(Map.of("title", "星际穿越", "year", 2014, "tag", "科幻温情经典、宇宙浪漫佳作", "reason", "硬核科幻与极致亲情的结合，受众极广，视觉与情感双重震撼"));
@@ -66,8 +58,8 @@ public class MovieBlogMain {
     }
 
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient.Builder()
-            .connectTimeout(25, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(180, TimeUnit.SECONDS) // 推理模型思考时间较长，拉长读取超时
             .writeTimeout(30, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .build();
@@ -157,12 +149,12 @@ public class MovieBlogMain {
 
         JSONObject reqBody = new JSONObject();
         reqBody.put("model", "deepseek-v4-flash");
-        reqBody.put("max_tokens", 256);
+        reqBody.put("max_tokens", 1024);
         reqBody.put("temperature", 0.8);
         reqBody.put("top_p", 0.9);
 
         JSONArray msgs = new JSONArray();
-        msgs.add(JSONObject.of("role", "system", "content", "你是专业自媒体标题专家，只返回3行纯文本标题。"));
+        msgs.add(JSONObject.of("role", "system", "content", "你是专业自媒体标题专家，只返回3行纯文本标题，禁止思考过程。"));
         msgs.add(JSONObject.of("role", "user", "content", prompt));
         reqBody.put("messages", msgs);
 
@@ -180,7 +172,15 @@ public class MovieBlogMain {
                 JSONObject resJson = JSONObject.parseObject(resStr);
                 JSONArray choices = resJson.getJSONArray("choices");
                 if (choices != null && !choices.isEmpty()) {
-                    String content = choices.getJSONObject(0).getJSONObject("message").getString("content");
+                    JSONObject message = choices.getJSONObject(0).getJSONObject("message");
+                    String content = message.getString("content");
+                    
+                    // 兜底提取
+                    if (isBlank(content)) {
+                        String reasoning = message.getString("reasoning_content");
+                        if (!isBlank(reasoning)) content = reasoning;
+                    }
+
                     if (content != null) {
                         String[] lines = content.trim().split("\n");
                         for (String line : lines) {
@@ -195,8 +195,6 @@ public class MovieBlogMain {
                         }
                     }
                 }
-            } else {
-                System.err.println("⚠️ 标题生成API请求失败 | HTTP状态码: " + resp.code());
             }
         } catch (Exception e) {
             System.err.println("⚠️生成标题异常：" + e.getMessage());
@@ -258,44 +256,42 @@ public class MovieBlogMain {
             usedKeySet.add(buildMovieKey(jo.getString("title"), jo.get("year")));
         }
 
-        String aiPickPrompt = "你是头条影视自媒体流量选片专家，当前年份：" + currentYear + "，当前时间：" + season + "，当前影视档期：" + fileStage + "。"
-                + "【最高优先级·强制保真铁律，违规直接作废】"
-                + "1、所有输出的影片名称、上映年份、热度信息必须是全网可查的真实官方数据，严禁AI虚构、严禁篡改上映年份、严禁编造热度！"
-                + "【选片优先级严格锁定】"
-                + "第一优先级（必选）：优先挑选本年度、近3个月内上映、全网有充足影评素材、剧情饱满、可深度解读的院线/网络真实新片。"
-                + "第二优先级（仅无合格新片时启用）：若全网无符合条件新片，再挑选高分长效真实经典影片。"
-                + "【去重铁律】绝对禁止选择以下已创作过的影片：" + usedKeySet
-                + "【返回规范】严格输出纯JSON，无多余文字，必填：{\"title\":\"\",\"year\":\"\",\"tag\":\"\",\"reason\":\"\",\"source\":\"\"}";
+        // 🎯 核心修复：极简Prompt，彻底解除“不知道新片又不能虚构”的逻辑死锁
+        String aiPickPrompt = "你是影视选片API。当前年份：" + currentYear + "。\n"
+                + "【最高指令】直接输出一部真实电影的JSON。严禁任何思考过程、解释或markdown！\n"
+                + "【选片规则】\n"
+                + "1. 严禁虚构！如果你不知道" + currentYear + "年有什么新片，【必须】直接选择一部2024年以前的经典高分老片。\n"
+                + "2. 不要解释为什么选老片！不要输出任何废话！\n"
+                + "3. 严格输出纯JSON：{\"title\":\"电影名\",\"year\":年份数字,\"tag\":\"标签\",\"reason\":\"20字以内选片理由\",\"source\":\"流量类型\"}\n"
+                + "【去重黑名单（绝对禁止选择）】：" + usedKeySet;
 
         JSONObject aiResult = null;
-        
-        // 🎯 核心修复：将 AI 重试次数从 3 次增加到 5 次，并增加详细日志
         for (int i = 0; i < 5; i++) {
             System.out.printf("🔄 正在执行第 %d/5 轮AI选片...%n", i + 1);
             aiResult = callAIPickMovie(aiPickPrompt);
-            
+
             if (aiResult == null) {
                 System.err.println("⚠️ 第" + (i + 1) + "轮AI选片返回结果为null，等待3秒后重试...");
                 sleepMs(3000);
                 continue;
             }
-            
+
             String title = aiResult.getString("title");
             Object yearObj = aiResult.get("year");
-            
+
             if (isBlank(title)) {
                 System.err.println("⚠️ 第" + (i + 1) + "轮AI选片返回的title为空 | AI返回完整数据: " + aiResult.toJSONString());
                 sleepMs(3000);
                 continue;
             }
-            
+
             int year = parseYear(yearObj);
             if (year <= 0) {
                 System.err.println("⚠️ 第" + (i + 1) + "轮AI选片返回的year无效: " + yearObj + " | AI返回完整数据: " + aiResult.toJSONString());
                 sleepMs(3000);
                 continue;
             }
-            
+
             String checkKey = buildMovieKey(title, year);
             if (!usedKeySet.contains(checkKey)) {
                 System.out.printf("✅ 第%d轮AI选片成功，找到新片: %s (%d)%n", i + 1, title, year);
@@ -389,12 +385,14 @@ public class MovieBlogMain {
         try {
             JSONObject reqBody = new JSONObject();
             reqBody.put("model", "deepseek-v4-flash");
-            reqBody.put("max_tokens", 1024);
+            // 🎯 核心修复：拉大 Token 上限，给推理模型足够的“思考+输出”空间
+            reqBody.put("max_tokens", 8192);
             reqBody.put("temperature", 0.7);
             reqBody.put("top_p", 0.9);
 
             JSONArray msgs = new JSONArray();
-            msgs.add(JSONObject.of("role", "system", "content", "你是专业影视流量分析师，零幻觉、零虚构，仅返回标准JSON。"));
+            msgs.add(JSONObject.of("role", "system", "content",
+                    "你是影视选片API。禁止输出任何思考过程、解释或markdown。只输出一个合法JSON对象。"));
             msgs.add(JSONObject.of("role", "user", "content", prompt));
             reqBody.put("messages", msgs);
 
@@ -404,58 +402,69 @@ public class MovieBlogMain {
                     .header("Authorization", "Bearer " + DEEPSEEK_API_KEY)
                     .post(body)
                     .build();
-            
+
             try (Response resp = HTTP_CLIENT.newCall(req).execute()) {
                 if (!resp.isSuccessful()) {
                     String errBody = resp.body() != null ? resp.body().string() : "无响应体";
                     System.err.println("❌ AI选片API请求失败 | HTTP状态码: " + resp.code() + " | 错误信息: " + errBody);
                     return null;
                 }
-                
+
                 String resStr = resp.body().string();
                 if (isBlank(resStr)) {
                     System.err.println("❌ AI选片API返回内容为空");
                     return null;
                 }
-                
+
                 JSONObject resJson = JSONObject.parseObject(resStr);
                 JSONArray choices = resJson.getJSONArray("choices");
                 if (choices == null || choices.isEmpty()) {
                     System.err.println("❌ AI选片API返回无choices字段 | 原始响应: " + resStr);
                     return null;
                 }
-                
-                String content = choices.getJSONObject(0).getJSONObject("message").getString("content");
+
+                JSONObject message = choices.getJSONObject(0).getJSONObject("message");
+                String content = message.getString("content");
+                String reasoning = message.getString("reasoning_content");
+
+                // 🎯 核心修复：如果 content 为空，强行从 reasoning_content 里抠出 JSON
+                if (isBlank(content) && !isBlank(reasoning)) {
+                    System.out.println("⚠️ content为空，尝试从reasoning_content中提取JSON...");
+                    int rStart = reasoning.indexOf('{');
+                    int rEnd = reasoning.lastIndexOf('}');
+                    if (rStart != -1 && rEnd != -1 && rEnd > rStart) {
+                        content = reasoning.substring(rStart, rEnd + 1);
+                    }
+                }
+
                 if (isBlank(content)) {
-                    System.err.println("❌ AI选片API返回content为空 | 原始响应: " + resStr);
+                    System.err.println("❌ AI选片API返回content为空且无法从reasoning中提取 | finish_reason: "
+                            + choices.getJSONObject(0).getString("finish_reason"));
                     return null;
                 }
-                
+
                 System.out.println("🤖 AI选片原始返回: " + content);
-                
+
                 int start = content.indexOf('{');
                 int end = content.lastIndexOf('}');
                 if (start != -1 && end != -1 && end > start) {
                     content = content.substring(start, end + 1);
-                } else {
-                    content = content.replaceAll("^```json|^```|```$", "").trim();
                 }
-                
+
                 if (isBlank(content)) {
-                    System.err.println("❌ AI选片内容清洗后为空 | 原始内容: " + choices.getJSONObject(0).getJSONObject("message").getString("content"));
+                    System.err.println("❌ AI选片内容清洗后为空");
                     return null;
                 }
-                
+
                 try {
                     return JSONObject.parseObject(content);
                 } catch (Exception parseEx) {
-                    System.err.println("❌ AI选片JSON解析失败 | 清洗后内容: " + content + " | 异常: " + parseEx.getMessage());
+                    System.err.println("❌ AI选片JSON解析失败 | 内容: " + content + " | 异常: " + parseEx.getMessage());
                     return null;
                 }
             }
         } catch (Exception e) {
             System.err.println("❌ AI选片发生未知异常: " + e.getMessage());
-            e.printStackTrace();
             return null;
         }
     }
@@ -499,7 +508,6 @@ public class MovieBlogMain {
         req.put("max_tokens", MAX_OUTPUT_TOKENS);
         req.put("temperature", 0.9);
         req.put("top_p", 0.95);
-        req.put("extra_body", JSONObject.of("thinking", false));
 
         JSONArray msgs = new JSONArray();
         msgs.add(JSONObject.of("role", "system", "content", sysPrompt));
@@ -512,9 +520,16 @@ public class MovieBlogMain {
                 RequestBody body = RequestBody.create(req.toString(), MediaType.parse("application/json;charset=utf-8"));
                 Response resp = HTTP_CLIENT.newCall(new Request.Builder().url(DEEPSEEK_URL)
                         .header("Authorization", "Bearer " + DEEPSEEK_API_KEY).post(body).build()).execute();
-                String raw = JSONObject.parseObject(resp.body().string())
-                        .getJSONArray("choices").getJSONObject(0)
-                        .getJSONObject("message").getString("content");
+                
+                JSONObject resJson = JSONObject.parseObject(resp.body().string());
+                JSONObject message = resJson.getJSONArray("choices").getJSONObject(0).getJSONObject("message");
+                String raw = message.getString("content");
+                
+                if (isBlank(raw)) {
+                    String reasoning = message.getString("reasoning_content");
+                    if (!isBlank(reasoning)) raw = reasoning;
+                }
+                
                 return cleanAiContent(raw);
             } catch (Exception e) {
                 System.err.println("⚠️ 影评生成第" + (i + 1) + "次重试异常: " + e.getMessage());
