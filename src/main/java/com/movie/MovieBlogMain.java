@@ -356,7 +356,8 @@ public class MovieBlogMain {
                 + "3. 善用反问、对比、转折制造情绪张力；\n"
                 + "4. 字数18-28字，适合头条/百家号；\n"
                 + "5. 严禁使用\"深度解读\"\"被低估的佳作\"等烂大街句式。\n"
-                + "【返回】每行一个标题，共3行，不要序号和前缀！";
+                + "6. 严禁输出任何思考过程、分析、解释或问候语！\n"
+                + "【返回格式】仅返回3行纯文本，每行一个标题，不要序号，不要前缀，不要markdown格式！";
 
         JSONObject reqBody = new JSONObject();
         reqBody.put("model", AI_MODEL);
@@ -365,7 +366,7 @@ public class MovieBlogMain {
         reqBody.put("top_p", 0.9);
 
         JSONArray msgs = new JSONArray();
-        msgs.add(JSONObject.of("role", "system", "content", "只返回3行纯文本标题，禁止任何多余文字。"));
+        msgs.add(JSONObject.of("role", "system", "content", "你是一个严格的格式输出机器。只返回3行纯文本标题，禁止任何思考过程、解释或多余文字。"));
         msgs.add(JSONObject.of("role", "user", "content", prompt));
         reqBody.put("messages", msgs);
 
@@ -380,14 +381,38 @@ public class MovieBlogMain {
                 JSONArray choices = resJson.getJSONArray("choices");
                 if (choices != null && !choices.isEmpty()) {
                     JSONObject message = choices.getJSONObject(0).getJSONObject("message");
-                    String content = extractContent(message);
-                    if (content != null) {
-                        for (String line : content.trim().split("\n")) {
+                    
+                    // 优先获取 content，如果为空则降级获取 reasoning_content
+                    String rawContent = message.getString("content");
+                    if (isBlank(rawContent)) {
+                        rawContent = message.getString("reasoning_content");
+                    }
+                    
+                    if (rawContent != null) {
+                        // 强力清理可能混入的思考过程标签和废话前缀
+                        String cleanContent = rawContent.replaceAll("(?is)<think>.*?</think>", "")
+                                .replaceAll("(?is)思考过程：.*?(?=\\n|$)", "")
+                                .replaceAll("(?is)分析如下：.*?(?=\\n|$)", "")
+                                .trim();
+                        
+                        for (String line : cleanContent.split("\n")) {
                             String clean = line.trim()
-                                    .replaceAll("^[0-9]+[.、)\\]:：]+\\s*", "")
-                                    .replaceAll("^标题[0-9]+[：:]\\s*", "")
-                                    .replaceAll("^[*\\-]\\s*", "");
-                            if (!clean.isEmpty()) titles.add(clean);
+                                    .replaceAll("^[0-9]+[.、)\\]:：]+\\s*", "") // 去除 1. 1、 1) 1: 1：
+                                    .replaceAll("^标题[0-9]+[：:]\\s*", "")     // 去除 标题1：
+                                    .replaceAll("^[*\\-]\\s*", "")              // 去除 - 或 *
+                                    .replaceAll("^\"|\"$", "")                  // 去除首尾引号
+                                    .trim();
+                            
+                            // 严格校验：必须是有效的标题格式，过滤掉AI的废话
+                            if (clean.length() >= 12 && clean.length() <= 40 
+                                && (clean.contains("《") || clean.contains(movieTitle)) // 必须包含书名号或电影名
+                                && !clean.contains("思考") 
+                                && !clean.contains("分析")
+                                && !clean.startsWith("好的")
+                                && !clean.startsWith("以下是")
+                                && !clean.startsWith("当然")) {
+                                titles.add(clean);
+                            }
                             if (titles.size() >= 3) break;
                         }
                     }
@@ -397,8 +422,15 @@ public class MovieBlogMain {
             System.err.println("⚠️生成标题异常：" + e.getMessage());
         }
 
+        // 兜底逻辑：如果AI抽风没提取到足够的合格标题，使用高质量模板兜底，确保程序不崩且推送正常
         while (titles.size() < 3) {
-            titles.add("《" + movieTitle + "》：看完沉默了整整一夜");
+            if (titles.size() == 0) {
+                titles.add("《" + movieTitle + "》：看懂了它，才算看懂了成年人的世界");
+            } else if (titles.size() == 1) {
+                titles.add("二刷《" + movieTitle + "》才明白，原来最扎心的细节藏在这里");
+            } else {
+                titles.add("被《" + movieTitle + "》硬控30分钟，这才是最该看的电影");
+            }
         }
         return titles.subList(0, 3);
     }
@@ -409,9 +441,14 @@ public class MovieBlogMain {
         if (isBlank(content)) {
             String reasoning = message.getString("reasoning_content");
             if (!isBlank(reasoning)) {
-                System.out.println("⚠️ content为空，从reasoning_content提取");
+                System.out.println("⚠️ content为空，尝试从reasoning_content提取");
                 content = reasoning;
             }
+        }
+        if (content != null) {
+            // 统一清理可能混入的思考过程标签 (兼容 DeepSeek 等模型的 reasoning 输出格式)
+            content = content.replaceAll("(?is)<think>.*?</think>", "").trim();
+            content = content.replaceAll("(?is)思考过程：.*?(?=\\n|$)", "").trim();
         }
         return content;
     }
