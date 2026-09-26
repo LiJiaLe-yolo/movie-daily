@@ -31,12 +31,11 @@ public class MovieBlogMain {
     private static final int ARTICLE_MAX_LEN = 1800;
     private static final int MAX_REWRITE_TIMES = 3;
     private static final int MAX_RESELECT_TIMES = 2;
-    private static final int MAX_TITLE_GEN_TIMES = 3; // 【新增】标题生成最大重试次数
     private static final int MAX_HISTORY_SIZE = 500;
     private static final String GIST_FILENAME = "movie_history.json";
     private static final String OUTPUT_DIR = "output";
 
-    // 动态兜底标题模板库（仅作为最终安全网，正常情况下不会触发）
+    // 仅作为最终安全网，配套生成模式下几乎不会触发
     private static final List<String> FALLBACK_TITLE_TEMPLATES = Arrays.asList(
             "《{m}》：那些被忽略的细节，藏着最真实的人性",
             "重温《{m}》，才读懂了导演没明说的隐喻",
@@ -108,6 +107,8 @@ public class MovieBlogMain {
 
             JSONObject selectMovie = null;
             String articleContent = null;
+            List<String> titles = null;
+
             for (int reSelect = 0; reSelect <= MAX_RESELECT_TIMES; reSelect++) {
                 selectMovie = autoPickMovieByAI(usedMovies, currentSeason, currentFileStage, currentYear);
                 String title = selectMovie.getString("title");
@@ -120,8 +121,17 @@ public class MovieBlogMain {
                         reSelect + 1, title, year, source, movieTag, selectReason);
 
                 try {
-                    articleContent = generateReviewWithRewrite(title, year, source, movieTag, selectReason);
-                    break;
+                    // 【核心改动】影评与标题配套生成，返回结果为 "标题区\n\n正文区"
+                    String combinedResult = generateArticleWithTitles(title, year, source, movieTag, selectReason);
+                    
+                    // 解析分离标题和正文
+                    String[] parsed = parseCombinedResult(combinedResult, title);
+                    titles = parseTitlesFromBlock(parsed[0], title);
+                    articleContent = parsed[1];
+                    
+                    if (articleContent != null && !articleContent.isBlank()) {
+                        break;
+                    }
                 } catch (Exception e) {
                     System.out.printf("⚠️当前影片生成失败，触发第%d次重选片 | %s%n", reSelect + 1, e.getMessage());
                     sleepMs(2000);
@@ -144,9 +154,12 @@ public class MovieBlogMain {
             String movieTag = selectMovie.getString("tag");
             String selectReason = selectMovie.getString("reason");
 
-            // 【优化】标题生成增加重试机制，最大化AI生成成功率
-            System.out.println("🔥正在生成3个爆款候选标题...");
-            List<String> titles = generateTitlesWithRetry(title, year, articleContent);
+            // 确保标题列表有效
+            if (titles == null || titles.isEmpty()) {
+                titles = generateFallbackTitles(title);
+            }
+            
+            System.out.println("🔥候选标题：");
             for (int i = 0; i < titles.size(); i++) {
                 System.out.println("   候选标题 " + (i + 1) + ": " + titles.get(i));
             }
@@ -301,22 +314,24 @@ public class MovieBlogMain {
         }
     }
 
-    // ==================== 影评生成 ====================
-    private static String generateReviewWithRewrite(String title, int year, String source, String tag, String reason) throws IOException {
+    // ==================== 影评+标题配套生成（核心改动） ====================
+    private static String generateArticleWithTitles(String title, int year, String source, String tag, String reason) throws IOException {
         for (int round = 1; round <= MAX_REWRITE_TIMES; round++) {
-            String content = generateReviewOnce(title, year, source, tag, reason, round);
-            if (content == null || content.isBlank() || content.length() < 100) {
+            String combined = generateArticleOnce(title, year, source, tag, reason, round);
+            if (combined == null || combined.isBlank() || combined.length() < 200) {
                 sleepMs(3000);
                 continue;
             }
-            int len = content.length();
-            if (len >= 1200 && len <= 2000) return content;
+            // 简单校验：必须包含分隔标记或足够长度
+            if (combined.contains("===ARTICLE_START===") || combined.length() >= 1200) {
+                return combined;
+            }
             sleepMs(3000);
         }
-        throw new IOException("当前影片素材不足，多轮重写失败");
+        throw new IOException("当前影片素材不足，多轮配套生成失败");
     }
 
-    private static String generateReviewOnce(String title, int year, String source, String tag, String reason, int rewriteRound) throws IOException {
+    private static String generateArticleOnce(String title, int year, String source, String tag, String reason, int rewriteRound) throws IOException {
         String extraRule;
         if (rewriteRound == 1) {
             extraRule = "完整深度创作，内容饱满，1400字以上。";
@@ -330,9 +345,17 @@ public class MovieBlogMain {
                 ? "本年度热门新片，短期流量充足。"
                 : "经典高分影片，长尾流量稳定。";
 
+        // 【核心改动】Prompt要求同时输出3个标题和正文，用固定标记分隔
         String sysPrompt = "你是一位拥有千万粉丝的深度影评博主，风格温柔细腻、清醒思辨、真诚有温度。你写的不是影评，而是借电影讲人性和生活。\n"
                 + "评析影片：" + title + "(" + year + ")｜" + tag + "｜" + reason + "｜" + flowTip + "\n\n"
-                + "【写作铁律】\n"
+                + "【任务】请先为这篇影评构思3个爆款标题，然后再写正文。标题必须是基于你即将写的正文内容提炼出来的，与正文强关联。\n\n"
+                + "【标题要求】\n"
+                + "1. 每个标题15-35字，必须包含电影名或角色名；\n"
+                + "2. 3个标题风格完全不同：一个悬念反差型、一个情感共鸣型、一个细节切入型；\n"
+                + "3. 必须有具体细节（台词/场景/数字），禁止空泛概括；\n"
+                + "4. 严禁使用\"深度解读\"\"被低估的佳作\"\"看懂了才算\"等烂大街句式；\n"
+                + "5. 只输出3行纯文本标题，不要序号、不要前缀、不要markdown。\n\n"
+                + "【正文写作铁律】\n"
                 + "1. 严禁复述剧情！只写感受和洞察；\n"
                 + "2. 开头必须是一个让人停下来的句子：反常识观点、扎心提问、或电影中最容易被忽略的细节；\n"
                 + "3. 全文围绕1-2个核心洞察展开，像跟朋友深夜聊天，不要面面俱到；\n"
@@ -340,17 +363,19 @@ public class MovieBlogMain {
                 + "5. 至少引用2处电影中的具体台词或场景作为论据，让文章有血有肉；\n"
                 + "6. 结尾不要喊口号，用一个安静的、余韵悠长的句子收束，让人读完想沉默一会儿；\n"
                 + "7. 短段落，每段不超过3行，适配手机阅读。禁止\"首先\"\"其次\"\"综上所述\"\"总而言之\"等AI腔调；\n"
-                + "8. 输出1400-1800字饱满正文，直接输出文章，不要标题，不要任何前后缀说明。" + extraRule;
+                + "8. 输出1400-1800字饱满正文。" + extraRule + "\n\n"
+                + "【输出格式】严格遵守以下格式，不要有任何额外说明：\n"
+                + "标题1\n标题2\n标题3\n===ARTICLE_START===\n正文内容";
 
         JSONObject req = new JSONObject();
         req.put("model", AI_MODEL);
         req.put("max_tokens", MAX_OUTPUT_TOKENS);
-        req.put("temperature", 0.9);
+        req.put("temperature", 0.92);
         req.put("top_p", 0.95);
 
         JSONArray msgs = new JSONArray();
         msgs.add(JSONObject.of("role", "system", "content", sysPrompt));
-        msgs.add(JSONObject.of("role", "user", "content", "输出一篇风格统一、深度饱满、字数达标的专属影评正文。"));
+        msgs.add(JSONObject.of("role", "user", "content", "请为《" + title + "》生成3个配套标题和一篇深度影评正文。"));
         req.put("messages", msgs);
 
         for (int i = 0; i < 3; i++) {
@@ -364,139 +389,99 @@ public class MovieBlogMain {
                 String raw = extractContent(message);
                 return cleanAiContent(raw);
             } catch (Exception e) {
-                System.err.println("⚠️ 影评生成第" + (i + 1) + "次异常: " + e.getMessage());
+                System.err.println("⚠️ 配套生成第" + (i + 1) + "次异常: " + e.getMessage());
                 sleepMs(2000);
             }
         }
-        throw new IOException("影评生成接口请求失败");
+        throw new IOException("配套生成接口请求失败");
     }
 
-    // ==================== 标题生成（带重试机制，最大化AI生成率） ====================
-    private static List<String> generateTitlesWithRetry(String movieTitle, int year, String articleContent) {
-        List<String> titles = new ArrayList<>();
-        for (int attempt = 1; attempt <= MAX_TITLE_GEN_TIMES; attempt++) {
-            System.out.printf("🔄 标题生成第 %d/%d 轮尝试...%n", attempt, MAX_TITLE_GEN_TIMES);
-            List<String> generated = generateTitlesOnce(movieTitle, year, articleContent, attempt);
-            
-            // 合并去重
-            for (String t : generated) {
-                if (!titles.contains(t)) {
-                    titles.add(t);
-                }
-            }
-            
-            if (titles.size() >= 3) {
-                System.out.printf("✅ 第%d轮即凑齐3个AI标题，无需继续重试%n", attempt);
+    /**
+     * 解析配套生成的结果，分离标题区和正文区
+     */
+    private static String[] parseCombinedResult(String combined, String movieTitle) {
+        if (combined == null || combined.isBlank()) {
+            return new String[]{"", ""};
+        }
+        
+        String separator = "===ARTICLE_START===";
+        int sepIdx = combined.indexOf(separator);
+        
+        if (sepIdx != -1) {
+            String titleBlock = combined.substring(0, sepIdx).trim();
+            String articleBlock = combined.substring(sepIdx + separator.length()).trim();
+            return new String[]{titleBlock, articleBlock};
+        }
+        
+        // 降级处理：如果没有分隔标记，尝试按前3行作为标题
+        String[] lines = combined.split("\n");
+        StringBuilder titleSb = new StringBuilder();
+        int articleStartLine = 0;
+        for (int i = 0; i < Math.min(lines.length, 5); i++) {
+            String line = lines[i].trim();
+            // 如果某行明显是正文特征（很长、含段落标记），则认为前面的是标题
+            if (line.length() > 50 || line.startsWith("##") || line.startsWith("**")) {
+                articleStartLine = i;
                 break;
             }
-            
-            if (attempt < MAX_TITLE_GEN_TIMES) {
-                System.out.printf("⚠️ 当前仅获得%d个合格标题，2秒后重试...%n", titles.size());
-                sleepMs(2000);
+            if (!line.isEmpty() && (line.contains("《") || line.contains(movieTitle))) {
+                titleSb.append(line).append("\n");
+                articleStartLine = i + 1;
             }
         }
-
-        // 最终安全网：仅在AI多次重试仍不足3个时才触发
-        if (titles.size() < 3) {
-            System.out.printf("⚠️ AI标题生成%d轮后仍仅有%d个，启用动态模板补齐%n", MAX_TITLE_GEN_TIMES, titles.size());
-            Random random = new Random();
-            while (titles.size() < 3) {
-                String template = FALLBACK_TITLE_TEMPLATES.get(random.nextInt(FALLBACK_TITLE_TEMPLATES.size()));
-                String fallbackTitle = template.replace("{m}", movieTitle);
-                if (!titles.contains(fallbackTitle)) {
-                    titles.add(fallbackTitle);
-                }
-            }
+        
+        StringBuilder articleSb = new StringBuilder();
+        for (int i = articleStartLine; i < lines.length; i++) {
+            articleSb.append(lines[i]).append("\n");
         }
-        return titles.subList(0, 3);
+        
+        return new String[]{titleSb.toString().trim(), articleSb.toString().trim()};
     }
 
-    private static List<String> generateTitlesOnce(String movieTitle, int year, String articleContent, int attempt) {
-        // 根据重试轮次动态调整Prompt，避免AI陷入相同输出模式
-        String diversityHint = "";
-        if (attempt == 2) {
-            diversityHint = "\n【重要提醒】上一轮生成的标题不够吸引人，本轮请换一种完全不同的切入角度，多用反问句和具体数字。";
-        } else if (attempt >= 3) {
-            diversityHint = "\n【最后机会】请务必跳出常规套路，可以从配角视角、反派动机、时代背景等冷门角度切入，制造强烈反差感。";
-        }
-
-        String prompt = "你是拥有10亿阅读量的头条影视爆款标题专家。\n"
-                + "请为电影《" + movieTitle + "》（" + year + "年）的深度影评写3个让读者忍不住点击的标题。\n"
-                + "【爆款公式】悬念/反差 + 情绪共鸣 + 具体细节（台词/场景/数字）\n"
-                + "【优秀示例参考】\n"
-                + "- 《肖申克的救赎》：安迪爬出下水道那一刻，我才懂自由有多贵\n"
-                + "- 三刷《让子弹飞》才发现，黄四郎输在了一个谁都没注意的细节\n"
-                + "- 《楚门的世界》最恐怖的不是谎言，而是我们习惯了被安排的人生\n"
-                + "【硬性要求】\n"
-                + "1. 必须包含电影名或角色名；\n"
-                + "2. 每个标题必须有至少一个具体细节，禁止空泛概括；\n"
-                + "3. 善用反问、对比、转折制造情绪张力；\n"
-                + "4. 3个标题的风格必须完全不同（一个悬念型、一个情感型、一个细节型）；\n"
-                + "5. 字数15-35字，适合头条/百家号；\n"
-                + "6. 严禁使用\"深度解读\"\"被低估的佳作\"\"看懂了才算\"等烂大街句式。\n"
-                + "7. 严禁输出任何思考过程、分析、解释或问候语！\n"
-                + "【返回格式】仅返回3行纯文本，每行一个标题，不要序号，不要前缀，不要markdown格式！"
-                + diversityHint;
-
-        JSONObject reqBody = new JSONObject();
-        reqBody.put("model", AI_MODEL);
-        reqBody.put("max_tokens", 512);
-        reqBody.put("temperature", 0.95);
-        reqBody.put("top_p", 0.9);
-
-        JSONArray msgs = new JSONArray();
-        msgs.add(JSONObject.of("role", "system", "content", "你是一个严格的格式输出机器。只返回3行纯文本标题，禁止任何思考过程、解释或多余文字。"));
-        msgs.add(JSONObject.of("role", "user", "content", prompt));
-        reqBody.put("messages", msgs);
-
-        RequestBody body = RequestBody.create(reqBody.toString(), MediaType.parse("application/json;charset=utf-8"));
-        Request req = new Request.Builder().url(DEEPSEEK_URL)
-                .header("Authorization", "Bearer " + DEEPSEEK_API_KEY).post(body).build();
-
+    /**
+     * 从标题块中解析出有效的标题列表
+     */
+    private static List<String> parseTitlesFromBlock(String titleBlock, String movieTitle) {
         List<String> titles = new ArrayList<>();
-        try (Response resp = HTTP_CLIENT.newCall(req).execute()) {
-            if (resp.isSuccessful()) {
-                JSONObject resJson = JSONObject.parseObject(resp.body().string());
-                JSONArray choices = resJson.getJSONArray("choices");
-                if (choices != null && !choices.isEmpty()) {
-                    JSONObject message = choices.getJSONObject(0).getJSONObject("message");
-
-                    String rawContent = message.getString("content");
-                    if (isBlank(rawContent)) {
-                        rawContent = message.getString("reasoning_content");
-                    }
-
-                    if (rawContent != null) {
-                        String cleanContent = rawContent.replaceAll("(?is)<think>.*?</think>", "")
-                                .replaceAll("(?is)思考过程：.*?(?=\\n|$)", "")
-                                .replaceAll("(?is)分析如下：.*?(?=\\n|$)", "")
-                                .trim();
-
-                        for (String line : cleanContent.split("\n")) {
-                            String clean = line.trim()
-                                    .replaceAll("^[0-9]+[.、)\\]:：]+\\s*", "")
-                                    .replaceAll("^标题[0-9]+[：:]\\s*", "")
-                                    .replaceAll("^[*\\-]\\s*", "")
-                                    .replaceAll("^\"|\"$", "")
-                                    .trim();
-
-                            // 放宽校验：10-50字，包含电影名或书名号，排除AI废话
-                            if (clean.length() >= 10 && clean.length() <= 50
-                                && (clean.contains("《") || clean.contains(movieTitle))
-                                && !clean.contains("思考")
-                                && !clean.contains("分析")
-                                && !clean.startsWith("好的")
-                                && !clean.startsWith("以下是")
-                                && !clean.startsWith("当然")) {
-                                titles.add(clean);
-                            }
-                            if (titles.size() >= 3) break;
-                        }
-                    }
-                }
+        if (titleBlock == null || titleBlock.isBlank()) {
+            return titles;
+        }
+        
+        for (String line : titleBlock.split("\n")) {
+            String clean = line.trim()
+                    .replaceAll("^[0-9]+[.、)\\]:：]+\\s*", "")
+                    .replaceAll("^标题[0-9]+[：:]\\s*", "")
+                    .replaceAll("^[*\\-]\\s*", "")
+                    .replaceAll("^\"|\"$", "")
+                    .trim();
+            
+            if (clean.length() >= 10 && clean.length() <= 50
+                && (clean.contains("《") || clean.contains(movieTitle))
+                && !clean.contains("思考")
+                && !clean.contains("分析")
+                && !clean.startsWith("好的")
+                && !clean.startsWith("以下是")
+                && !clean.startsWith("当然")
+                && !clean.contains("===")) {
+                titles.add(clean);
             }
-        } catch (Exception e) {
-            System.err.println("⚠️ 标题生成第" + attempt + "轮异常：" + e.getMessage());
+            if (titles.size() >= 3) break;
+        }
+        return titles;
+    }
+
+    /**
+     * 生成兜底标题（仅在配套生成完全失败时调用）
+     */
+    private static List<String> generateFallbackTitles(String movieTitle) {
+        List<String> titles = new ArrayList<>();
+        Random random = new Random();
+        while (titles.size() < 3) {
+            String template = FALLBACK_TITLE_TEMPLATES.get(random.nextInt(FALLBACK_TITLE_TEMPLATES.size()));
+            String fallbackTitle = template.replace("{m}", movieTitle);
+            if (!titles.contains(fallbackTitle)) {
+                titles.add(fallbackTitle);
+            }
         }
         return titles;
     }
