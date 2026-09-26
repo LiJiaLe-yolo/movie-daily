@@ -35,6 +35,30 @@ public class MovieBlogMain {
     private static final String GIST_FILENAME = "movie_history.json";
     private static final String OUTPUT_DIR = "output";
 
+    // ==================== 动态兜底标题模板库（20个） ====================
+    private static final List<String> FALLBACK_TITLE_TEMPLATES = Arrays.asList(
+            "《{m}》：那些被忽略的细节，藏着最真实的人性",
+            "重温《{m}》，才读懂了导演没明说的隐喻",
+            "为什么《{m}》后劲这么大？这几个细节太戳人了",
+            "《{m}》深度解析：看懂这些，才算没白看",
+            "初看不知片中意，再看已是《{m}》局中人",
+            "《{m}》里最扎心的一幕，成年人看了都沉默",
+            "别只当爆米花电影看，《{m}》的细节细思极恐",
+            "《{m}》观影指南：这3个隐藏彩蛋你发现了吗？",
+            "看完《{m}》才发现，我们都在演别人的故事",
+            "《{m}》最狠的不是剧情，而是照进现实的镜子",
+            "十年后再看《{m}》，终于理解了那句台词的重量",
+            "《{m}》：一部被片名耽误的神作，值得N刷",
+            "全网都在聊《{m}》，但90%的人没看懂这个细节",
+            "《{m}》里藏着的暗线，比主线更让人破防",
+            "以为是爽片，结果《{m}》把我看哭了三次",
+            "《{m}》：成年人的崩溃，都藏在这些镜头里",
+            "刷完《{m}》才明白，有些遗憾注定无法弥补",
+            "《{m}》最被低估的一场戏，信息量太大了",
+            "不敢二刷《{m}》，不是不好看，是太疼了",
+            "《{m}》结局反转背后，藏着导演最深的温柔"
+    );
+
     private static final List<Map<String, Object>> CLASSIC_MOVIE_POOL;
     static {
         CLASSIC_MOVIE_POOL = new ArrayList<>();
@@ -345,24 +369,30 @@ public class MovieBlogMain {
         throw new IOException("影评生成接口请求失败");
     }
 
-    // ==================== 标题生成 ====================
+    // ==================== 标题生成（已优化） ====================
     private static List<String> generateTitles(String movieTitle, int year, String articleContent) {
+        // 优化Prompt：增加Few-Shot示例 + 更明确的多样性要求
         String prompt = "你是拥有10亿阅读量的头条影视爆款标题专家。\n"
                 + "请为电影《" + movieTitle + "》（" + year + "年）的深度影评写3个让读者忍不住点击的标题。\n"
                 + "【爆款公式】悬念/反差 + 情绪共鸣 + 具体细节（台词/场景/数字）\n"
+                + "【优秀示例参考】\n"
+                + "- 《肖申克的救赎》：安迪爬出下水道那一刻，我才懂自由有多贵\n"
+                + "- 三刷《让子弹飞》才发现，黄四郎输在了一个谁都没注意的细节\n"
+                + "- 《楚门的世界》最恐怖的不是谎言，而是我们习惯了被安排的人生\n"
                 + "【硬性要求】\n"
                 + "1. 必须包含电影名或角色名；\n"
                 + "2. 每个标题必须有至少一个具体细节，禁止空泛概括；\n"
                 + "3. 善用反问、对比、转折制造情绪张力；\n"
-                + "4. 字数18-28字，适合头条/百家号；\n"
-                + "5. 严禁使用\"深度解读\"\"被低估的佳作\"等烂大街句式。\n"
-                + "6. 严禁输出任何思考过程、分析、解释或问候语！\n"
+                + "4. 3个标题的风格必须完全不同（一个悬念型、一个情感型、一个细节型）；\n"
+                + "5. 字数15-35字，适合头条/百家号；\n"
+                + "6. 严禁使用\"深度解读\"\"被低估的佳作\"\"看懂了才算\"等烂大街句式。\n"
+                + "7. 严禁输出任何思考过程、分析、解释或问候语！\n"
                 + "【返回格式】仅返回3行纯文本，每行一个标题，不要序号，不要前缀，不要markdown格式！";
 
         JSONObject reqBody = new JSONObject();
         reqBody.put("model", AI_MODEL);
         reqBody.put("max_tokens", 512);
-        reqBody.put("temperature", 0.85);
+        reqBody.put("temperature", 0.95);  // 提高温度值，增强标题多样性
         reqBody.put("top_p", 0.9);
 
         JSONArray msgs = new JSONArray();
@@ -381,20 +411,20 @@ public class MovieBlogMain {
                 JSONArray choices = resJson.getJSONArray("choices");
                 if (choices != null && !choices.isEmpty()) {
                     JSONObject message = choices.getJSONObject(0).getJSONObject("message");
-                    
+
                     // 优先获取 content，如果为空则降级获取 reasoning_content
                     String rawContent = message.getString("content");
                     if (isBlank(rawContent)) {
                         rawContent = message.getString("reasoning_content");
                     }
-                    
+
                     if (rawContent != null) {
                         // 强力清理可能混入的思考过程标签和废话前缀
                         String cleanContent = rawContent.replaceAll("(?is)<think>.*?</think>", "")
                                 .replaceAll("(?is)思考过程：.*?(?=\\n|$)", "")
                                 .replaceAll("(?is)分析如下：.*?(?=\\n|$)", "")
                                 .trim();
-                        
+
                         for (String line : cleanContent.split("\n")) {
                             String clean = line.trim()
                                     .replaceAll("^[0-9]+[.、)\\]:：]+\\s*", "") // 去除 1. 1、 1) 1: 1：
@@ -402,11 +432,11 @@ public class MovieBlogMain {
                                     .replaceAll("^[*\\-]\\s*", "")              // 去除 - 或 *
                                     .replaceAll("^\"|\"$", "")                  // 去除首尾引号
                                     .trim();
-                            
-                            // 严格校验：必须是有效的标题格式，过滤掉AI的废话
-                            if (clean.length() >= 12 && clean.length() <= 40 
+
+                            // 【优化】放宽校验规则：字数10-50，减少误杀
+                            if (clean.length() >= 10 && clean.length() <= 50
                                 && (clean.contains("《") || clean.contains(movieTitle)) // 必须包含书名号或电影名
-                                && !clean.contains("思考") 
+                                && !clean.contains("思考")
                                 && !clean.contains("分析")
                                 && !clean.startsWith("好的")
                                 && !clean.startsWith("以下是")
@@ -422,14 +452,14 @@ public class MovieBlogMain {
             System.err.println("⚠️生成标题异常：" + e.getMessage());
         }
 
-        // 兜底逻辑：如果AI抽风没提取到足够的合格标题，使用高质量模板兜底，确保程序不崩且推送正常
+        // 【优化】动态兜底：从20个模板中随机选取，避免标题雷同
+        Random random = new Random();
         while (titles.size() < 3) {
-            if (titles.size() == 0) {
-                titles.add("《" + movieTitle + "》：看懂了它，才算看懂了成年人的世界");
-            } else if (titles.size() == 1) {
-                titles.add("二刷《" + movieTitle + "》才明白，原来最扎心的细节藏在这里");
-            } else {
-                titles.add("被《" + movieTitle + "》硬控30分钟，这才是最该看的电影");
+            String template = FALLBACK_TITLE_TEMPLATES.get(random.nextInt(FALLBACK_TITLE_TEMPLATES.size()));
+            String fallbackTitle = template.replace("{m}", movieTitle);
+            // 避免兜底标题与已有标题重复
+            if (!titles.contains(fallbackTitle)) {
+                titles.add(fallbackTitle);
             }
         }
         return titles.subList(0, 3);
@@ -472,7 +502,7 @@ public class MovieBlogMain {
 
     private static String cleanAiContent(String s) {
         if (s == null) return "";
-        return s.trim().replaceAll("^```markdown|^```|```$", "").replace("\r\n", "\n").trim();
+        return s.trim().replaceAll("^```markdown|^```|``` $ ", "").replace("\r\n", "\n").trim();
     }
 
     private static String getCurrentSeason() {
