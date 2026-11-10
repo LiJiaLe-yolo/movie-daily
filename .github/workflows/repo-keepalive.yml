@@ -1,24 +1,24 @@
-name: 仓库保活任务
-on:
-  schedule:
-    - cron: '0 0 */15 * *'  # 每15天执行一次
-  workflow_dispatch:
-jobs:
-  keep-alive:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        with:
-          # 关键：使用 github‑app token 模式，不要填 GH_PAT
-          fetch-depth: 0
-      - name: 执行空提交保活
-        run: |
-          git config --global user.name "KeepAlive‑Bot"
-          git config --global user.email "bot@no‑mail.example"
-          # 强制替换origin为内置GITHUB_TOKEN的url，这一步是根治403的核心
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          git commit --allow-empty -m "chore: repo keep‑alive"
-          git push
+# name: 仓库保活任务
+# on:
+#   schedule:
+#     - cron: '0 0 */15 * *'  # 每15天执行一次
+#   workflow_dispatch:
+# jobs:
+#   keep-alive:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: write
+#     steps:
+#       - name: 检出代码
+#         uses: actions/checkout@v4
+#         with:
+#           # 关键：使用 github‑app token 模式，不要填 GH_PAT
+#           fetch-depth: 0
+#       - name: 执行空提交保活
+#         run: |
+#           git config --global user.name "KeepAlive‑Bot"
+#           git config --global user.email "bot@no‑mail.example"
+#           # 强制替换origin为内置GITHUB_TOKEN的url，这一步是根治403的核心
+#           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+#           git commit --allow-empty -m "chore: repo keep‑alive"
+#           git push
